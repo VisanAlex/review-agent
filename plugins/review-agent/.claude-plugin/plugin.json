@@ -1,0 +1,18 @@
+{
+  "name": "review-agent",
+  "version": "0.3.0",
+  "description": "Orchestrate evidence-based code reviews with risk-selected specialist agents from the current host.",
+  "author": {
+    "name": "Alex Visan",
+    "url": "https://github.com/VisanAlex"
+  },
+  "homepage": "https://github.com/VisanAlex/review-agent",
+  "repository": "https://github.com/VisanAlex/review-agent",
+  "license": "MIT",
+  "keywords": [
+    "code-review",
+    "multi-agent",
+    "agent-skills"
+  ],
+  "skills": "./skills/"
+}

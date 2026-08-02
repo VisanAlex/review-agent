@@ -1,0 +1,30 @@
+{
+  "name": "review-agent",
+  "version": "0.3.0",
+  "description": "Orchestrate evidence-based code reviews with risk-selected specialist agents from the current host.",
+  "author": {
+    "name": "Alex Visan",
+    "url": "https://github.com/VisanAlex"
+  },
+  "homepage": "https://github.com/VisanAlex/review-agent",
+  "repository": "https://github.com/VisanAlex/review-agent",
+  "license": "MIT",
+  "keywords": [
+    "code-review",
+    "multi-agent",
+    "agent-skills"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Review Agent",
+    "shortDescription": "Run focused multi-agent code reviews.",
+    "longDescription": "Review Git changes with risk-selected specialist agents from the current Codex session. Other models are used only when explicitly requested.",
+    "developerName": "Alex Visan",
+    "category": "Productivity",
+    "capabilities": [],
+    "websiteURL": "https://github.com/VisanAlex/review-agent",
+    "defaultPrompt": [
+      "Use $review-agent to review my current Git changes."
+    ]
+  }
+}

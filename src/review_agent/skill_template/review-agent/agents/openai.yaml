@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Agent"
+  short_description: "Orchestrate evidence-based specialist reviews"
+  default_prompt: "Use $review-agent to review my current Git changes."
