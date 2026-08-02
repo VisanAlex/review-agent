@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "review-agent",
+  "owner": {
+    "name": "Alex Visan"
+  },
+  "metadata": {
+    "description": "Portable, host-native specialist code review orchestration."
+  },
+  "plugins": [
+    {
+      "name": "review-agent",
+      "source": "./plugins/review-agent",
+      "description": "Review Git changes with risk-selected specialist agents from the invoking host.",
+      "category": "development",
+      "tags": [
+        "code-review",
+        "multi-agent",
+        "agent-skills"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "review-agent-orchestrator"
+version = "0.3.0"
+description = "A portable skill and helper for host-orchestrated specialist code reviews"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Alex Visan" }]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/VisanAlex/review-agent"
+Repository = "https://github.com/VisanAlex/review-agent"
+Issues = "https://github.com/VisanAlex/review-agent/issues"
+
+[project.scripts]
+review-agent = "review_agent.cli:entrypoint"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+review_agent = ["skill_template/**/*.md", "skill_template/**/*.yaml"]
