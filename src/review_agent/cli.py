@@ -543,7 +543,7 @@ def _external(args: argparse.Namespace) -> int:
         plan = recommend_roles(changes, policy=_policy(config))
         role = ReviewerRole(args.role)
         recommendation = next(
-            (item for item in [*plan.selected_roles, *plan.skipped_roles] if item.role is role),
+            (item for item in plan.selected_roles if item.role is role),
             None,
         )
         focus = (args.focus or "").strip()
@@ -551,7 +551,7 @@ def _external(args: argparse.Namespace) -> int:
             focus = (
                 recommendation.reason
                 if recommendation is not None
-                else f"Review {role.value} risks in the changed code."
+                else f"Review the changed code for concrete {role.value.replace('-', ' ')} risks."
             )
         assignment = ReviewerAssignment(
             reviewer_id=f"{role.value}-external",

@@ -345,6 +345,43 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 2)
         self.assertIn("requires --role or --assignment", stderr.getvalue())
 
+    def test_external_fallback_role_gets_actionable_focus_when_plan_selects_none(self) -> None:
+        repo = self.make_repo()
+        (repo / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+        (repo / "README.md").write_text("Documentation only.\n", encoding="utf-8")
+        run = ReviewerRun(
+            reviewer_id="correctness-external@codex",
+            role=ReviewerRole.CORRECTNESS,
+            origin=ExecutionOrigin.EXTERNAL_HOST,
+            target="codex",
+            context_id="correctness-external@codex",
+            status=ReviewerStatus.SUCCEEDED,
+        )
+
+        with patch("review_agent.cli.run_external_reviews", return_value=[run]) as external:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                exit_code = main(
+                    [
+                        "external",
+                        "--repo",
+                        str(repo),
+                        "--request",
+                        "Review the working tree with codex",
+                        "--current-host",
+                        "claude",
+                        "--role",
+                        "correctness",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        built_assignment = external.call_args.args[1]
+        self.assertEqual(
+            built_assignment.focus,
+            "Review the changed code for concrete correctness risks.",
+        )
+        self.assertNotIn("No specialist signal", built_assignment.focus)
+
     def test_consolidate_accepts_external_result_envelope(self) -> None:
         repo = self.make_repo()
         plan_path = repo / "plan.json"
