@@ -181,3 +181,16 @@ python -m pip wheel . --no-deps --wheel-dir dist
 `src/review_agent/skill_template/review-agent` is the canonical skill source. After changing it, run `python scripts/sync_plugin_skill.py` to refresh the marketplace copy; tests reject drift between them.
 
 Routine tests use fake hosts, fake CLI processes, and a fake OpenRouter transport. They do not invoke paid models.
+
+## Troubleshooting helper installation
+
+If an older Ubuntu Python packaging stack previously installed `UNKNOWN-0.0.0`, remove that placeholder and reinstall without its cached wheel:
+
+```bash
+python3 -m pip uninstall -y UNKNOWN
+python3 -m pip install --user --no-cache-dir --force-reinstall "git+https://github.com/VisanAlex/review-agent.git"
+export PATH="$HOME/.local/bin:$PATH"
+review-agent --version
+```
+
+The expected result is `review-agent 0.3.1`. Version 0.3.1 includes a legacy setuptools metadata fallback while retaining the modern `pyproject.toml` package definition.
