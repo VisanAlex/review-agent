@@ -1,6 +1,6 @@
 {
   "name": "review-agent",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Orchestrate evidence-based code reviews with risk-selected specialist agents from the current host.",
   "author": {
     "name": "Alex Visan",

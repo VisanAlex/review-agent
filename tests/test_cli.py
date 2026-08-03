@@ -287,6 +287,64 @@ class CliTests(unittest.TestCase):
         self.assertEqual(document["normalized_targets"], ["claude"])
         self.assertEqual(document["reviewer_runs"][0]["origin"], "external-host")
 
+    def test_direct_role_dispatches_between_codex_and_claude_without_assignment_file(self) -> None:
+        for current_host, target in [("claude", "codex"), ("codex", "claude")]:
+            with self.subTest(current_host=current_host, target=target):
+                repo = self.make_repo()
+                run = ReviewerRun(
+                    reviewer_id=f"correctness-external@{target}",
+                    role=ReviewerRole.CORRECTNESS,
+                    origin=ExecutionOrigin.EXTERNAL_HOST,
+                    target=target,
+                    context_id=f"correctness-external@{target}",
+                    status=ReviewerStatus.SUCCEEDED,
+                )
+                stdout = io.StringIO()
+                with patch("review_agent.cli.run_external_reviews", return_value=[run]) as external:
+                    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
+                        exit_code = main(
+                            [
+                                "external",
+                                "--repo",
+                                str(repo),
+                                "--request",
+                                f"Review the working tree with {target}",
+                                "--current-host",
+                                current_host,
+                                "--role",
+                                "correctness",
+                            ]
+                        )
+                self.assertEqual(exit_code, 0)
+                targets, built_assignment, dispatched_repo, _ = external.call_args.args
+                self.assertEqual(targets, [target])
+                self.assertEqual(built_assignment.role, ReviewerRole.CORRECTNESS)
+                self.assertEqual(
+                    Path(built_assignment.change_context["repository_root"]), repo.resolve()
+                )
+                self.assertIn("VALUE = 2", built_assignment.change_context["diff"])
+                self.assertEqual(dispatched_repo, repo.resolve())
+                envelope = json.loads(stdout.getvalue())
+                self.assertEqual(envelope["normalized_targets"], [target])
+
+    def test_external_requires_role_or_assignment_only_after_authorization(self) -> None:
+        repo = self.make_repo()
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "external",
+                    "--repo",
+                    str(repo),
+                    "--request",
+                    "Review with codex",
+                    "--current-host",
+                    "claude",
+                ]
+            )
+        self.assertEqual(exit_code, 2)
+        self.assertIn("requires --role or --assignment", stderr.getvalue())
+
     def test_consolidate_accepts_external_result_envelope(self) -> None:
         repo = self.make_repo()
         plan_path = repo / "plan.json"

@@ -59,6 +59,26 @@ class CanonicalSkillContractTests(unittest.TestCase):
         self.assertIn("mere mention", text)
         self.assertIn("not consent", text)
 
+    def test_external_dispatch_uses_one_mandatory_helper_protocol(self) -> None:
+        text = self.read("references/external-reviewers.md")
+        self.assertIn(
+            "review-agent external --repo <repository-root> <scope-flags> "
+            "--request <exact-user-invocation> --current-host <invoking-host> "
+            "--role <selected-role>",
+            text,
+        )
+        lowered = text.lower()
+        self.assertIn("external dispatch is not discretionary", lowered)
+        self.assertIn("sole authority for external coverage", lowered)
+        self.assertIn("never claim that an adapter is unregistered", lowered)
+        self.assertIn("concrete redacted process error", lowered)
+
+    def test_report_language_defaults_to_english_without_locale_inference(self) -> None:
+        text = self.read("SKILL.md").lower()
+        self.assertIn("when no language was requested, use english", text)
+        for source in ["system locale", "timezone", "repository text", "reviewer output"]:
+            self.assertIn(source, text)
+
     def test_helper_is_optional_and_deterministic(self) -> None:
         text = self.read("SKILL.md").lower()
         self.assertIn("optional deterministic helper", text)

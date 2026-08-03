@@ -109,11 +109,14 @@ The initial registry contains Codex CLI, Claude Code CLI, and OpenRouter. No ada
 
 After valid consent:
 
+- The parent executes `review-agent external` with the exact invocation, invoking-host identity, selected role, and Git scope. It never infers adapter availability from the IDE or its visible tools.
 - Codex runs ephemerally with a read-only sandbox and structured-output schema.
 - Claude Code disables session persistence, uses structured output, and allows only `Read`, `Glob`, and `Grep` tools.
 - OpenRouter receives only the bounded assignment, requires the exact requested model and `OPENROUTER_API_KEY`, and receives the shared JSON schema.
 
-External targets can run concurrently, but results return in requested order. A target is never replaced by another model. Temporary handoff directories are private, symlink-checked, and removed on success or failure. Errors redact credentials.
+External targets can run concurrently, but results return in requested order. The helper's structured status and redacted error are the sole authority for coverage; the parent cannot invent an unavailable or unregistered adapter result. A target is never replaced by another model. Temporary handoff directories are private, symlink-checked, and removed on success or failure. Errors redact credentials.
+
+Final reports use the user's explicitly requested language and otherwise default to English. Locale, timezone, repository content, and reviewer output do not select the report language.
 
 ## 7. Finding validation and consolidation
 

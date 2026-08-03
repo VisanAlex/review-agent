@@ -23,7 +23,24 @@ Kiro and Cursor are not external adapters in the initial registry. They can stil
 
 ## Dispatch
 
-Do not send repository context before parsing valid authorization. If the optional helper exposes the `external` command, give each named target one bounded reviewer assignment and use only its registered adapter. Never substitute a different host or model when a target is unavailable.
+Do not send repository context before parsing valid authorization. After authorization, echo the normalized external targets and state that bounded review context will be sent.
+
+When `review-agent` is callable, external dispatch is not discretionary. Choose the most relevant selected role, or `correctness` when no specialist was selected, and execute exactly one helper command for all authorized targets:
+
+```text
+review-agent external --repo <repository-root> <scope-flags> --request <exact-user-invocation> --current-host <invoking-host> --role <selected-role>
+```
+
+Map the review scope to no scope flags for the working tree, `--staged` for staged changes, or `--base <ref> --head <ref>` for a comparison. Pass dynamic values as separate process arguments when the host supports argument arrays; otherwise quote them for the active shell. The helper collects the bounded context, removes the invoking host from the target set, calls only registered adapters, and prints a schema-versioned result envelope.
+
+Use the helper result as the sole authority for external coverage:
+
+- Parse every item in `reviewer_runs` and preserve its exact `target`, `origin`, `status`, and redacted `error`.
+- Never claim that an adapter is unregistered, unavailable, unauthenticated, timed out, or invalid unless the helper process or its structured result says so.
+- If the helper cannot be started or exits before returning structured JSON, report the concrete redacted process error. Do not replace that error with an inference about IDE, extension, terminal, PATH, or host capabilities.
+- Do not substitute a different host or model. Do not retry through an unrequested target.
+
+If the helper is absent, record each authorized target as unavailable because `review-agent` could not be started. Native or fallback review still proceeds. External adapters are the one feature for which the optional helper is required.
 
 Require `OPENROUTER_API_KEY` for OpenRouter and an explicit model ID. Do not place credentials in repository configuration or output. Keep temporary handoff data private and ephemeral.
 
