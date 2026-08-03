@@ -16,7 +16,13 @@ from .external import (
     run_external_reviews,
 )
 from .git_changes import ChangeCollectionError, ChangeSet, collect_changes, repository_root
-from .models import ReviewerRole, ReviewPlan, ReviewPolicy, RoleRecommendation
+from .models import (
+    ReviewerAssignment,
+    ReviewerRole,
+    ReviewPlan,
+    ReviewPolicy,
+    RoleRecommendation,
+)
 from .planning import recommend_roles
 from .review import (
     build_assignment_prompt,
@@ -242,11 +248,19 @@ def build_parser() -> argparse.ArgumentParser:
     external_parser = subparsers.add_parser(
         "external", help="Run only external targets explicitly authorized by a with directive"
     )
-    _add_repo_argument(external_parser)
+    _add_change_arguments(external_parser)
     external_parser.add_argument("--request", required=True, help="Original review invocation text")
     external_parser.add_argument("--current-host", required=True, help="Invoking host name")
     external_parser.add_argument(
-        "--assignment", type=Path, required=True, help="Bounded reviewer assignment JSON"
+        "--assignment", type=Path, help="Existing bounded reviewer assignment JSON"
+    )
+    external_parser.add_argument(
+        "--role",
+        choices=tuple(role.value for role in ReviewerRole),
+        help="Build an assignment for this role directly from the requested Git scope",
+    )
+    external_parser.add_argument(
+        "--focus", help="Optional role-specific focus when building the assignment"
     )
     external_parser.add_argument("--timeout", type=int, help="Per-target timeout in seconds")
     external_parser.add_argument("--output", type=Path, help="Write external result envelope")
@@ -499,14 +513,56 @@ def _external(args: argparse.Namespace) -> int:
     timeout = args.timeout if args.timeout is not None else config["external"]["timeout_seconds"]
     if type(timeout) is not int or timeout < 1:
         raise ConfigError("timeout must be a positive integer")
-    try:
-        assignment = assignment_from_mapping(_read_json(args.assignment, label="assignment"))
-    except ValueError as exc:
-        raise ConfigError(f"Invalid assignment {args.assignment}: {exc}") from exc
-    assignment_root = Path(str(assignment.change_context["repository_root"])).resolve()
-    if assignment_root != repo:
-        raise ConfigError(
-            f"Assignment repository {assignment_root} does not match requested repository {repo}"
+    if args.assignment is not None and args.role is not None:
+        raise ConfigError("Choose either --assignment or --role, not both")
+    if args.assignment is not None and args.focus is not None:
+        raise ConfigError("--focus can only be used with --role")
+    if args.assignment is not None:
+        if (
+            args.base is not None
+            or args.staged
+            or args.working_tree
+            or args.head != "HEAD"
+            or args.max_diff_chars is not None
+        ):
+            raise ConfigError("Git scope flags cannot be combined with --assignment")
+        try:
+            assignment = assignment_from_mapping(_read_json(args.assignment, label="assignment"))
+        except ValueError as exc:
+            raise ConfigError(f"Invalid assignment {args.assignment}: {exc}") from exc
+        assignment_root = Path(str(assignment.change_context["repository_root"])).resolve()
+        if assignment_root != repo:
+            raise ConfigError(
+                f"Assignment repository {assignment_root} does not match requested repository {repo}"
+            )
+    else:
+        if args.role is None:
+            raise ConfigError("external requires --role or --assignment after a target is authorized")
+        args.repo = repo
+        changes = _changes(args, config)
+        plan = recommend_roles(changes, policy=_policy(config))
+        role = ReviewerRole(args.role)
+        recommendation = next(
+            (item for item in plan.selected_roles if item.role is role),
+            None,
+        )
+        focus = (args.focus or "").strip()
+        if not focus:
+            focus = (
+                recommendation.reason
+                if recommendation is not None
+                else f"Review the changed code for concrete {role.value.replace('-', ' ')} risks."
+            )
+        assignment = ReviewerAssignment(
+            reviewer_id=f"{role.value}-external",
+            role=role,
+            focus=focus,
+            exclusions=[
+                "Do not edit files or delegate.",
+                "Do not run tests, builds, package managers, project scripts, or arbitrary commands.",
+                "Do not report generic style advice or defects outside the supplied change.",
+            ],
+            change_context=_context_document(changes, plan)["change_context"],
         )
 
     print(f"External targets: {', '.join(targets)}", file=sys.stderr)

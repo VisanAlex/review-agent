@@ -89,6 +89,16 @@ External adapters require the optional helper. Codex and Claude use their existi
 
 If an external target is unavailable, times out, or returns invalid output, native results remain valid and the report names the missing coverage.
 
+The host must use the helper as the external boundary. For example, a Claude parent reviewing against `staging` dispatches Codex through the equivalent of:
+
+```bash
+review-agent external --repo . --base staging \
+  --request "Review the current branch against staging with codex" \
+  --current-host claude --role correctness
+```
+
+The skill selects the role and runs this command automatically. The command prints a structured external result; it does not run the invoking host's native specialists or produce the final consolidated report by itself.
+
 ## Host support
 
 | Host | Skill install | Native execution |
@@ -114,7 +124,7 @@ review-agent context --base main --head HEAD --format json
 review-agent context --format prompt --role security
 ```
 
-`review-agent consolidate --plan <plan.json> --result <result.json>` validates reviewer results, removes unsupported/off-diff findings, deduplicates likely matches, and renders the final report. The `external` command is reserved for skill-orchestrated, explicitly authorized target calls.
+`review-agent consolidate --plan <plan.json> --result <result.json>` validates reviewer results, removes unsupported/off-diff findings, deduplicates likely matches, and renders the final report. The `external` command calls the explicitly authorized model target and is normally owned by the skill. It accepts either the direct `--role` plus Git-scope form shown above or the lower-level `--assignment <file>` form.
 
 Check an optional adapter without sending repository context:
 

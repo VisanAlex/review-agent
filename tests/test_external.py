@@ -14,6 +14,7 @@ from review_agent.external import (
     CodexExternalAdapter,
     OpenRouterExternalAdapter,
     _windows_node_shim_command,
+    build_external_prompt,
     make_adapter,
     parse_external_targets,
     run_external_reviews,
@@ -160,6 +161,35 @@ class ExternalAdapterTests(unittest.TestCase):
         self.assertEqual(args[args.index("--tools") + 1], "Read,Glob,Grep")
         self.assertNotIn("Bash", args)
         self.assertNotIn("Edit", args)
+        self.assertIn("natural-language prose in English", str(runner.calls[0][1]["input"]))
+
+    def test_external_prompt_preserves_literal_paths_and_code(self) -> None:
+        task = assignment(Path.cwd())
+        task.change_context["files"] = ["src/überprüfung.py"]
+        task.change_context["diff"] = "+prüfung_id = '未翻译'\n"
+
+        prompt = build_external_prompt(task)
+
+        self.assertIn("Preserve file paths, identifiers, code excerpts", prompt)
+        self.assertIn("never translate, normalize, or rewrite those literal values", prompt)
+        self.assertIn("src/überprüfung.py", prompt)
+        self.assertIn("prüfung_id", prompt)
+        self.assertIn("未翻译", prompt)
+
+    def test_claude_structured_output_failure_preserves_result_subtype(self) -> None:
+        def runner(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            wrapper = {
+                "type": "result",
+                "subtype": "error_max_structured_output_retries",
+                "result": "Could not satisfy the schema",
+            }
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps(wrapper), stderr="")
+
+        adapter = ClaudeExternalAdapter(["claude"], runner=runner)
+        with tempfile.TemporaryDirectory() as directory:
+            result = adapter.review(assignment(Path(directory)), Path(directory), 30)
+        self.assertEqual(result.status, ReviewerStatus.FAILED)
+        self.assertIn("error_max_structured_output_retries", result.error or "")
 
     def test_timeout_and_validation_failure_clean_handoff_directory(self) -> None:
         for failure in [subprocess.TimeoutExpired("codex", 1), None]:
