@@ -162,7 +162,10 @@ def derive_risk_signals(changes: ChangeSet) -> set[str]:
     suffixes = {PurePosixPath(path).suffix for path in paths}
     signals: set[str] = set()
 
-    if paths and all(PurePosixPath(path).suffix in DOCUMENT_SUFFIXES for path in paths):
+    if paths and all(
+        PurePosixPath(path).suffix in DOCUMENT_SUFFIXES and not _is_dependency_path(path)
+        for path in paths
+    ):
         signals.add("documentation-only")
         return signals
 

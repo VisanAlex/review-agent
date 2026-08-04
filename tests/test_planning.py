@@ -70,6 +70,17 @@ class RiskPlanningTests(unittest.TestCase):
         self.assertIn(ReviewerRole.DEPENDENCY_SUPPLY_CHAIN, selected)
         self.assertNotIn(ReviewerRole.ARCHITECTURE, selected)
 
+    def test_requirements_text_files_are_dependency_manifests_not_documentation(self) -> None:
+        for path in ["requirements.txt", "requirements-dev.txt"]:
+            with self.subTest(path=path):
+                selected = self.roles(
+                    path,
+                    diff="+requests==2.32.4",
+                    policy=ReviewPolicy(max_reviewers=12),
+                )
+
+                self.assertIn(ReviewerRole.DEPENDENCY_SUPPLY_CHAIN, selected)
+
     def test_deployment_change_recommends_operations(self) -> None:
         selected = self.roles(
             ".github/workflows/deploy.yml",
