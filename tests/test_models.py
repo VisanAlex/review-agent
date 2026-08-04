@@ -16,6 +16,9 @@ from review_agent.models import (
 
 
 class ReviewModelTests(unittest.TestCase):
+    def test_reviewer_roster_has_twelve_behavioral_roles(self) -> None:
+        self.assertEqual(len(ReviewerRole), 12)
+
     def test_fallback_roles_in_one_context_do_not_create_corroboration(self) -> None:
         finding = Finding(
             title="Mutation precedes authorization",

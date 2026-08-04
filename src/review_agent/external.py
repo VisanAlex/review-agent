@@ -30,7 +30,8 @@ AdapterFactory = Callable[[str], "ExternalAdapter"]
 
 NODE_SHIM_PATTERN = re.compile(r"%dp0%[\\/]+([^\"\r\n]+?\.(?:js|cjs|mjs))", re.IGNORECASE)
 WITH_PATTERN = re.compile(
-    r"(?:^|\s)with\s+([a-z0-9._:/-]+(?:\s*,\s*[a-z0-9._:/-]+)*)",
+    r"(?:^|\s)with\s+(?!(?:(?:a\s+)?max(?:imum)?|up\s+to|all)\b)"
+    r"([a-z0-9._:/-]+(?:\s*,\s*[a-z0-9._:/-]+)*)",
     re.IGNORECASE,
 )
 MODEL_PATTERN = re.compile(r"^[A-Za-z0-9._/-]+$")

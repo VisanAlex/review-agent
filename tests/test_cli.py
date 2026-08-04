@@ -75,8 +75,97 @@ class CliTests(unittest.TestCase):
         self.assertEqual(document["review_plan"]["requested_external_targets"], [])
         self.assertIn("app.py", document["change_context"]["files"])
 
+    def test_invocation_limit_overrides_project_configuration(self) -> None:
+        repo = self.make_repo()
+        (repo / ".review-agent.json").write_text(
+            json.dumps({"version": 2, "review": {"max_reviewers": 2}}),
+            encoding="utf-8",
+        )
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "plan",
+                    "--repo",
+                    str(repo),
+                    "--request",
+                    "Review using max 7 specialists",
+                    "--format",
+                    "json",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        plan = json.loads(stdout.getvalue())["review_plan"]
+        self.assertEqual(plan["max_reviewers"], 7)
+        self.assertEqual(plan["reviewer_limit_source"], "invocation")
+
+    def test_cli_limit_overrides_all_relevant_invocation(self) -> None:
+        repo = self.make_repo()
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(
+                main(
+                    [
+                        "context",
+                        "--repo",
+                        str(repo),
+                        "--request",
+                        "Use all relevant reviewers",
+                        "--max-reviewers",
+                        "5",
+                    ]
+                ),
+                0,
+            )
+
+        plan = json.loads(stdout.getvalue())["review_plan"]
+        self.assertEqual(plan["max_reviewers"], 5)
+        self.assertEqual(plan["reviewer_limit_source"], "cli")
+
+    def test_all_relevant_cli_flag_uses_the_full_roster(self) -> None:
+        repo = self.make_repo()
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(
+                main(["plan", "--repo", str(repo), "--all-relevant", "--format", "json"]),
+                0,
+            )
+
+        plan = json.loads(stdout.getvalue())["review_plan"]
+        self.assertEqual(plan["max_reviewers"], 12)
+        self.assertEqual(plan["reviewer_limit_source"], "cli")
+
+    def test_invalid_invocation_limit_returns_a_clean_error(self) -> None:
+        repo = self.make_repo()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            exit_code = main(
+                ["plan", "--repo", str(repo), "--request", "Use max 13 specialists"]
+            )
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("between 1 and 12", stderr.getvalue())
+
     def test_context_json_marks_diff_as_untrusted_and_writes_no_state(self) -> None:
         repo = self.make_repo()
+        (repo / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+        memory = repo / ".review-agent"
+        incidents = memory / "incidents"
+        incidents.mkdir(parents=True)
+        (memory / "invariants.md").write_text(
+            "The app.py value is a public compatibility invariant.\n",
+            encoding="utf-8",
+        )
+        (incidents / "app-value.md").write_text(
+            "A previous app.py value change broke downstream callers.\n",
+            encoding="utf-8",
+        )
+        git(repo, "add", ".review-agent")
+        git(repo, "commit", "-m", "add review memory")
+        (repo / "app.py").write_text("VALUE = 2\n", encoding="utf-8")
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
             exit_code = main(["context", "--repo", str(repo), "--format", "json"])
@@ -84,10 +173,23 @@ class CliTests(unittest.TestCase):
         document = json.loads(stdout.getvalue())
         self.assertFalse(document["change_context"]["diff_trusted"])
         self.assertIn("VALUE = 2", document["change_context"]["diff"])
+        repository_context = document["change_context"]["repository_context"]
+        self.assertFalse(repository_context["trusted"])
+        self.assertEqual(len(repository_context["invariants"]), 1)
+        self.assertEqual(len(repository_context["incidents"]), 1)
         self.assertFalse((repo / ".review-agent-state").exists())
 
     def test_context_prompt_builds_one_bounded_role_assignment(self) -> None:
         repo = self.make_repo()
+        (repo / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+        memory = repo / ".review-agent"
+        memory.mkdir()
+        (memory / "invariants.md").write_text(
+            "The public value must remain stable.\n", encoding="utf-8"
+        )
+        git(repo, "add", ".review-agent")
+        git(repo, "commit", "-m", "add review invariants")
+        (repo / "app.py").write_text("VALUE = 2\n", encoding="utf-8")
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
             exit_code = main(
@@ -96,6 +198,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("correctness specialist", stdout.getvalue())
         self.assertIn("untrusted data", stdout.getvalue())
+        self.assertIn("The public value must remain stable", stdout.getvalue())
 
     def test_consolidate_validates_results_and_writes_both_formats(self) -> None:
         repo = self.make_repo()
@@ -323,6 +426,7 @@ class CliTests(unittest.TestCase):
                     Path(built_assignment.change_context["repository_root"]), repo.resolve()
                 )
                 self.assertIn("VALUE = 2", built_assignment.change_context["diff"])
+                self.assertIn("repository_context", built_assignment.change_context)
                 self.assertEqual(dispatched_repo, repo.resolve())
                 envelope = json.loads(stdout.getvalue())
                 self.assertEqual(envelope["normalized_targets"], [target])

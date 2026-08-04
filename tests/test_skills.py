@@ -84,6 +84,49 @@ class CanonicalSkillContractTests(unittest.TestCase):
         self.assertIn("optional deterministic helper", text)
         self.assertIn("continue with host-native", text)
 
+    def test_skill_defines_twelve_behavioral_roles(self) -> None:
+        text = self.read("references/reviewer-roles.md")
+        for role in [
+            "correctness",
+            "testing",
+            "security",
+            "data-integrity",
+            "api-compatibility",
+            "frontend-accessibility",
+            "concurrency-reliability",
+            "performance",
+            "architecture",
+            "dependency-supply-chain",
+            "deployment-operations",
+            "internationalization",
+        ]:
+            self.assertIn(f"`{role}`", text)
+
+    def test_per_run_limit_and_repository_memory_are_part_of_context_collection(self) -> None:
+        text = self.read("SKILL.md")
+        lowered = text.lower()
+        self.assertIn("--request <exact-user-invocation>", text)
+        self.assertIn("all relevant specialists", lowered)
+        self.assertIn("invocation override", lowered)
+        self.assertIn("repository invariants", lowered)
+        self.assertIn("incident", lowered)
+        self.assertIn("untrusted", lowered)
+
+    def test_finding_verification_is_a_mandatory_pipeline_gate(self) -> None:
+        text = self.read("references/reviewer-contract.md").lower()
+        stages = [
+            "change-mapper",
+            "role-selector",
+            "finding-verifier",
+            "deduplicator",
+            "severity-calibrator",
+            "final-synthesizer",
+        ]
+        offsets = [text.index(stage) for stage in stages]
+        self.assertEqual(offsets, sorted(offsets))
+        self.assertIn("raw reviewer findings are never publishable", text)
+        self.assertIn("mandatory", text)
+
     def test_references_are_one_level_and_linked_from_skill(self) -> None:
         skill_text = self.read("SKILL.md")
         expected = {
