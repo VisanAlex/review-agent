@@ -52,6 +52,9 @@ class ReviewerRole(StringEnum):
     CONCURRENCY_RELIABILITY = "concurrency-reliability"
     PERFORMANCE = "performance"
     ARCHITECTURE = "architecture"
+    DEPENDENCY_SUPPLY_CHAIN = "dependency-supply-chain"
+    DEPLOYMENT_OPERATIONS = "deployment-operations"
+    INTERNATIONALIZATION = "internationalization"
 
 
 @dataclass(frozen=True)
@@ -91,6 +94,7 @@ class ReviewPlan:
     requested_external_targets: list[str] = field(default_factory=list)
     max_reviewers: int = 4
     risk_signals: list[str] = field(default_factory=list)
+    reviewer_limit_source: str = "default"
 
     @property
     def execution_mode_hint(self) -> ExecutionMode:
@@ -106,6 +110,7 @@ class ReviewPlan:
             "skipped_roles": [item.to_dict() for item in self.skipped_roles],
             "requested_external_targets": list(self.requested_external_targets),
             "max_reviewers": self.max_reviewers,
+            "reviewer_limit_source": self.reviewer_limit_source,
             "risk_signals": list(self.risk_signals),
         }
 

@@ -62,9 +62,21 @@ Kiro/Cursor invocation -> native subagents when exposed, otherwise labeled fallb
 
 Installing another agent CLI never changes this behavior. Review Agent does not scan for Codex, Claude, OpenRouter, or credentials during a normal run.
 
-The parent inspects the change and selects only justified roles from correctness, testing, security, data integrity, API compatibility, frontend/accessibility, concurrency/reliability, performance, and architecture. Documentation-only changes can intentionally use no specialist roster.
+The parent inspects the change and selects only justified roles from correctness, testing, security, data integrity, API compatibility, frontend/accessibility, concurrency/reliability, performance, architecture, dependency/supply-chain, deployment/operations, and internationalization. The roles are language-independent. Documentation-only changes can intentionally use no specialist roster.
 
 If native subagents are unavailable or denied, the parent runs the selected lenses sequentially and labels the result `single-agent-fallback`. Those passes share one context and are never presented as independent agreement.
+
+## Reviewer depth
+
+Four specialists is the default, not a hard limit. Override it for one review in natural language:
+
+```text
+Use $review-agent on this branch using max 7 specialists
+Use /review-agent on my staged changes with up to 6 review agents
+Use $review-agent on this branch using all relevant specialists
+```
+
+`all relevant specialists` raises the cap to the full 12-role roster; it does not spawn irrelevant reviewers. Limit precedence is the current invocation, then `.review-agent.json`, then the default of four. Direct helper users can pass `--max-reviewers N` or `--all-relevant`; an explicit CLI flag takes precedence over text passed with `--request`.
 
 ## Optional external review
 
@@ -120,7 +132,7 @@ These commands run Git and deterministic validation only. They do not call a mod
 review-agent doctor
 review-agent plan
 review-agent plan --staged --format json
-review-agent context --base main --head HEAD --format json
+review-agent context --base main --head HEAD --format json --request "Review using max 7 specialists"
 review-agent context --format prompt --role security
 ```
 
@@ -162,6 +174,19 @@ Version 2 has no provider list and no external default:
 
 Version 1 was an unreleased provider-first prototype. The helper rejects it with migration guidance instead of carrying forward automatic Codex-plus-Claude behavior.
 
+The configured maximum can be any value from 1 through 12. It is still a cap: deterministic change signals decide which relevant roles actually run. `roles.include` can force a role into the candidate roster and `roles.exclude` can forbid one.
+
+## Repository review memory
+
+Review Agent can give specialists bounded project-specific history without adding another service:
+
+```text
+.review-agent/invariants.md
+.review-agent/incidents/2026-08-orders-retry.md
+```
+
+Invariants are always included when present. Incident notes are selected deterministically from changed paths, risk signals, and identifiers in the bounded diff, with Unicode-aware matching, at most three notes, and strict per-document/total character limits. Symlinked context is ignored. This material is always labeled untrusted: it may strengthen a failure scenario, but it cannot change the review workflow or replace changed-code evidence.
+
 ## Report semantics
 
 Every report names its real execution mode:
@@ -173,7 +198,7 @@ Every report names its real execution mode:
 - `hybrid-native-external`: native specialists plus explicit external review.
 - `hybrid-fallback-external`: sequential fallback plus explicit external review.
 
-Findings require changed-code evidence, a plausible failure scenario, affected behavior, and a correction or regression-test direction. Agreement counts only when distinct context IDs support the same defect.
+Raw reviewer findings are never published directly. The parent must reopen the changed code and verify the literal path, location, evidence, trigger, affected behavior, and change causality before deduplication and severity calibration. Agreement counts only when distinct context IDs support the same verified defect.
 
 See [How it works](docs/how-it-works.md) for the execution and security contracts.
 
@@ -203,4 +228,4 @@ export PATH="$HOME/.local/bin:$PATH"
 review-agent --version
 ```
 
-The expected result is `review-agent 0.3.1`. Version 0.3.1 includes a legacy setuptools metadata fallback while retaining the modern `pyproject.toml` package definition.
+The expected result is `review-agent 0.4.0` or newer. The package retains a legacy setuptools metadata fallback for older Ubuntu Python packaging stacks while using `pyproject.toml` on modern installers.

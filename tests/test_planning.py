@@ -5,7 +5,7 @@ from pathlib import Path
 
 from review_agent.git_changes import ChangeSet
 from review_agent.models import ReviewerRole, ReviewPolicy
-from review_agent.planning import recommend_roles
+from review_agent.planning import parse_reviewer_limit, recommend_roles
 
 
 def changes(*files: str, diff: str = "") -> ChangeSet:
@@ -60,6 +60,53 @@ class RiskPlanningTests(unittest.TestCase):
 
         self.assertIn(ReviewerRole.API_COMPATIBILITY, selected)
 
+    def test_dependency_manifest_recommends_supply_chain_without_architecture_overlap(self) -> None:
+        selected = self.roles(
+            "package-lock.json",
+            diff='+    "left-pad": "1.3.0"',
+            policy=ReviewPolicy(max_reviewers=12),
+        )
+
+        self.assertIn(ReviewerRole.DEPENDENCY_SUPPLY_CHAIN, selected)
+        self.assertNotIn(ReviewerRole.ARCHITECTURE, selected)
+
+    def test_deployment_change_recommends_operations(self) -> None:
+        selected = self.roles(
+            ".github/workflows/deploy.yml",
+            "infra/kubernetes/api-deployment.yaml",
+            diff="+readinessProbe:\n+  timeoutSeconds: 1",
+            policy=ReviewPolicy(max_reviewers=12),
+        )
+
+        self.assertIn(ReviewerRole.DEPLOYMENT_OPERATIONS, selected)
+
+    def test_locale_change_recommends_internationalization(self) -> None:
+        selected = self.roles(
+            "src/locales/ar/messages.po",
+            diff='+msgstr "مرحبا"\n+dir="rtl"',
+            policy=ReviewPolicy(max_reviewers=12),
+        )
+
+        self.assertIn(ReviewerRole.INTERNATIONALIZATION, selected)
+
+    def test_architecture_remains_for_structural_framework_configuration(self) -> None:
+        selected = self.roles(
+            "src/architecture/module_boundaries.py",
+            diff="+ALLOWED_DEPENDENCIES = {'domain': set()}",
+            policy=ReviewPolicy(max_reviewers=12),
+        )
+
+        self.assertIn(ReviewerRole.ARCHITECTURE, selected)
+
+    def test_test_helpers_do_not_trigger_architecture(self) -> None:
+        selected = self.roles(
+            "spec/rails_helper.rb",
+            diff="+RSpec.configure { |config| config.order = :random }",
+            policy=ReviewPolicy(max_reviewers=12),
+        )
+
+        self.assertNotIn(ReviewerRole.ARCHITECTURE, selected)
+
     def test_reviewer_cap_is_deterministic(self) -> None:
         change = changes(
             "src/auth/api/orders.py",
@@ -86,6 +133,22 @@ class RiskPlanningTests(unittest.TestCase):
 
         self.assertIn(ReviewerRole.PERFORMANCE, selected)
         self.assertNotIn(ReviewerRole.TESTING, selected)
+
+    def test_natural_language_reviewer_limits_are_deterministic(self) -> None:
+        self.assertEqual(parse_reviewer_limit("Review with max 7 specialists"), 7)
+        self.assertEqual(parse_reviewer_limit("Use up to 6 review agents"), 6)
+        self.assertEqual(parse_reviewer_limit("Use all relevant reviewers"), 12)
+        self.assertIsNone(parse_reviewer_limit("Review the current branch"))
+
+    def test_natural_language_reviewer_limit_rejects_out_of_range_values(self) -> None:
+        with self.assertRaisesRegex(ValueError, "between 1 and 12"):
+            parse_reviewer_limit("Review with max 13 specialists")
+
+    def test_conflicting_natural_language_limits_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "conflicting reviewer limits"):
+            parse_reviewer_limit("Use max 5 specialists, actually use max 7 reviewers")
+        with self.assertRaisesRegex(ValueError, "conflicting reviewer limits"):
+            parse_reviewer_limit("Use all relevant specialists with max 7 reviewers")
 
 
 if __name__ == "__main__":

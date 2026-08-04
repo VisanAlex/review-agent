@@ -105,6 +105,16 @@ class ExternalTargetParsingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_external_targets("Review with claude, Claude")
 
+    def test_reviewer_limit_with_clause_is_not_an_external_target(self) -> None:
+        self.assertEqual(
+            parse_external_targets("Review with max 7 specialists with codex"),
+            ["codex"],
+        )
+        self.assertEqual(
+            parse_external_targets("Review with up to 6 review agents"),
+            [],
+        )
+
     def test_assignment_rejects_malformed_context_fields(self) -> None:
         value = assignment(Path.cwd()).to_dict()
         value["change_context"]["diff"] = ["not", "text"]

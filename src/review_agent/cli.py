@@ -23,7 +23,7 @@ from .models import (
     ReviewPolicy,
     RoleRecommendation,
 )
-from .planning import recommend_roles
+from .planning import parse_reviewer_limit, recommend_roles
 from .review import (
     build_assignment_prompt,
     consolidate,
@@ -31,6 +31,7 @@ from .review import (
     render_markdown,
     reviewer_run_from_mapping,
 )
+from .repository_context import collect_repository_context
 from .skills import SkillInstallError, install_personal_skills
 
 
@@ -153,6 +154,12 @@ def _changes(args: argparse.Namespace, config: dict[str, Any]) -> ChangeSet:
 
 
 def _context_document(changes: ChangeSet, plan: ReviewPlan) -> dict[str, Any]:
+    repository_context = collect_repository_context(
+        changes.repo,
+        changed_files=changes.files,
+        risk_signals=plan.risk_signals,
+        diff=changes.diff,
+    )
     return {
         "schema_version": 1,
         "change_context": {
@@ -165,6 +172,7 @@ def _context_document(changes: ChangeSet, plan: ReviewPlan) -> dict[str, Any]:
             "diff": changes.diff,
             "diff_trusted": False,
             "truncated": changes.truncated,
+            "repository_context": repository_context,
         },
         "review_plan": plan.to_dict(),
     }
@@ -188,6 +196,24 @@ def _add_change_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--head", default="HEAD", help="Head revision used with --base (default: HEAD)")
     parser.add_argument("--max-diff-chars", type=int, help="Maximum diff characters in the context")
+
+
+def _add_reviewer_limit_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--request",
+        help="Exact review invocation used to parse a per-run specialist limit",
+    )
+    limits = parser.add_mutually_exclusive_group()
+    limits.add_argument(
+        "--max-reviewers",
+        type=int,
+        help="Override the specialist cap for this run",
+    )
+    limits.add_argument(
+        "--all-relevant",
+        action="store_true",
+        help="Allow every relevant specialist for this run",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -226,12 +252,14 @@ def build_parser() -> argparse.ArgumentParser:
         "plan", help="Inspect the change and recommend specialists without calling a model"
     )
     _add_change_arguments(plan_parser)
+    _add_reviewer_limit_arguments(plan_parser)
     plan_parser.add_argument("--format", choices=("text", "json"), default="text")
 
     context_parser = subparsers.add_parser(
         "context", help="Emit bounded review context without calling a model"
     )
     _add_change_arguments(context_parser)
+    _add_reviewer_limit_arguments(context_parser)
     context_parser.add_argument("--format", choices=("json", "prompt"), default="json")
     context_parser.add_argument("--role", choices=tuple(role.value for role in ReviewerRole))
 
@@ -344,7 +372,32 @@ def _prepare(args: argparse.Namespace) -> tuple[ChangeSet, ReviewPlan]:
     args.repo = repository_root(args.repo)
     config = load_config(args.repo)
     changes = _changes(args, config)
-    return changes, recommend_roles(changes, policy=_policy(config))
+    policy = _policy(config)
+    limit = policy.max_reviewers
+    source = "project-config" if (args.repo / ".review-agent.json").exists() else "default"
+    try:
+        requested_limit = parse_reviewer_limit(args.request)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+    if requested_limit is not None:
+        limit = requested_limit
+        source = "invocation"
+    if args.all_relevant:
+        limit = len(ReviewerRole)
+        source = "cli"
+    elif args.max_reviewers is not None:
+        if not 1 <= args.max_reviewers <= len(ReviewerRole):
+            raise ConfigError(f"max-reviewers must be between 1 and {len(ReviewerRole)}")
+        limit = args.max_reviewers
+        source = "cli"
+    policy = ReviewPolicy(
+        max_reviewers=limit,
+        include_roles=policy.include_roles,
+        exclude_roles=policy.exclude_roles,
+    )
+    plan = recommend_roles(changes, policy=policy)
+    plan.reviewer_limit_source = source
+    return changes, plan
 
 
 def _plan(args: argparse.Namespace) -> int:
@@ -361,6 +414,7 @@ def _plan(args: argparse.Namespace) -> int:
     print(f"Languages/file types: {', '.join(changes.languages) or 'none'}")
     print(f"Diff characters: {len(changes.diff)}{' (truncated)' if changes.truncated else ''}")
     print(f"Risk signals: {', '.join(plan.risk_signals) or 'none'}")
+    print(f"Reviewer limit: {plan.max_reviewers} ({plan.reviewer_limit_source})")
     print("Selected specialists:")
     if plan.selected_roles:
         for item in plan.selected_roles:
@@ -377,8 +431,9 @@ def _plan(args: argparse.Namespace) -> int:
 
 def _context(args: argparse.Namespace) -> int:
     changes, plan = _prepare(args)
+    document = _context_document(changes, plan)
     if args.format == "json":
-        print(json.dumps(_context_document(changes, plan), indent=2, ensure_ascii=False))
+        print(json.dumps(document, indent=2, ensure_ascii=False))
         return 0
     if args.role is None:
         raise ConfigError("context --format prompt requires --role")
@@ -387,7 +442,14 @@ def _context(args: argparse.Namespace) -> int:
         (item for item in [*plan.selected_roles, *plan.skipped_roles] if item.role is role), None
     )
     focus = recommendation.reason if recommendation is not None else f"Review {role.value} risks."
-    print(build_assignment_prompt(changes, role, focus))
+    print(
+        build_assignment_prompt(
+            changes,
+            role,
+            focus,
+            repository_context=document["change_context"]["repository_context"],
+        )
+    )
     return 0
 
 
@@ -433,8 +495,11 @@ def _plan_from_document(document: Any) -> tuple[ReviewPlan, dict[str, Any]]:
     if not isinstance(risk_signals, list) or not all(isinstance(item, str) for item in risk_signals):
         raise ConfigError("plan risk_signals must be an array of strings")
     max_reviewers = raw_plan.get("max_reviewers", 4)
-    if type(max_reviewers) is not int or max_reviewers < 1:
-        raise ConfigError("plan max_reviewers must be a positive integer")
+    if type(max_reviewers) is not int or not 1 <= max_reviewers <= len(ReviewerRole):
+        raise ConfigError(f"plan max_reviewers must be between 1 and {len(ReviewerRole)}")
+    reviewer_limit_source = str(raw_plan.get("reviewer_limit_source", "default")).strip()
+    if reviewer_limit_source not in {"default", "project-config", "invocation", "cli"}:
+        raise ConfigError("plan reviewer_limit_source is invalid")
     source = str(raw_plan.get("source", context.get("source", ""))).strip()
     if not source:
         raise ConfigError("plan source must be non-empty")
@@ -446,6 +511,7 @@ def _plan_from_document(document: Any) -> tuple[ReviewPlan, dict[str, Any]]:
             requested_external_targets=list(external),
             max_reviewers=max_reviewers,
             risk_signals=list(risk_signals),
+            reviewer_limit_source=reviewer_limit_source,
         ),
         context,
     )
