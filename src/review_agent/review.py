@@ -405,9 +405,19 @@ def consolidate(
         for finding in run.findings[:20]:
             if normalized_changed_files is not None and finding.file.casefold() not in normalized_changed_files:
                 continue
+            affected_locations = (
+                [
+                    location
+                    for location in finding.affected_locations
+                    if location.file.casefold() not in normalized_changed_files
+                ]
+                if normalized_changed_files is not None
+                else finding.affected_locations
+            )
             raw_findings.append(
                 replace(
                     finding,
+                    affected_locations=affected_locations,
                     reviewer_ids=sorted(set(finding.reviewer_ids) | {run.reviewer_id}),
                     context_ids=sorted(set(finding.context_ids) | {run.context_id}),
                 )

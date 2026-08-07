@@ -274,15 +274,22 @@ def _tracked_files(changes: ChangeSet) -> tuple[list[str], str | None]:
     return sorted(set(paths)), None
 
 
-def _safe_candidate(repo: Path, relative_path: str) -> Path | None:
+def _allowed_candidate_path(relative_path: str) -> bool:
     normalized = relative_path.replace("\\", "/")
     pure = PurePosixPath(normalized)
     if pure.is_absolute() or ".." in pure.parts or any(
         part.casefold() in IGNORED_PARTS for part in pure.parts
     ):
-        return None
+        return False
     if pure.suffix.casefold() in BINARY_SUFFIXES:
+        return False
+    return True
+
+
+def _safe_candidate(repo: Path, relative_path: str) -> Path | None:
+    if not _allowed_candidate_path(relative_path):
         return None
+    pure = PurePosixPath(relative_path.replace("\\", "/"))
     candidate = repo.joinpath(*pure.parts)
     if candidate.is_symlink() or not candidate.is_file():
         return None
@@ -376,6 +383,8 @@ def collect_impact_context(
     for relative_path in tracked_files:
         normalized = relative_path.replace("\\", "/")
         if normalized.casefold() in changed:
+            continue
+        if not _allowed_candidate_path(normalized):
             continue
         if scanned_files >= max_files or total_chars >= max_total_chars:
             limited = True

@@ -89,6 +89,14 @@ class ImpactContextTests(unittest.TestCase):
 
     def test_committed_comparison_reads_the_reviewed_head_not_the_checkout(self) -> None:
         repo = self.make_repo()
+        (repo / "generated").mkdir()
+        (repo / "generated" / "caller.py").write_text(
+            "calculate_total([])\n",
+            encoding="utf-8",
+        )
+        (repo / "archive.pdf").write_text("calculate_total([])\n", encoding="utf-8")
+        git(repo, "add", "archive.pdf", "generated/caller.py")
+        git(repo, "commit", "-m", "add generated caller")
         git(repo, "switch", "-c", "feature")
         (repo / "pricing.py").write_text(
             "def calculate_total(items):\n    return max(items, default=0)\n",
@@ -102,13 +110,23 @@ class ImpactContextTests(unittest.TestCase):
         git(repo, "commit", "-m", "remove invoice caller")
 
         changes = collect_changes(repo, base="main", head="feature")
-        context = collect_impact_context(changes)
+        context = collect_impact_context(changes, max_files=1)
 
         self.assertEqual(changes.snapshot_ref, "feature")
         self.assertIn("invoice.py", {item["file"] for item in context["affected_locations"]})
+        self.assertNotIn("archive.pdf", {item["file"] for item in context["affected_locations"]})
+        self.assertNotIn("generated/caller.py", {item["file"] for item in context["affected_locations"]})
 
     def test_staged_comparison_reads_the_index_not_unstaged_consumers(self) -> None:
         repo = self.make_repo()
+        (repo / "generated").mkdir()
+        (repo / "generated" / "caller.py").write_text(
+            "calculate_total([])\n",
+            encoding="utf-8",
+        )
+        (repo / "archive.pdf").write_text("calculate_total([])\n", encoding="utf-8")
+        git(repo, "add", "archive.pdf", "generated/caller.py")
+        git(repo, "commit", "-m", "add generated caller")
         (repo / "pricing.py").write_text(
             "def calculate_total(items):\n    return max(items, default=0)\n",
             encoding="utf-8",
@@ -116,9 +134,11 @@ class ImpactContextTests(unittest.TestCase):
         git(repo, "add", "pricing.py")
         (repo / "invoice.py").write_text("TOTAL = 0\n", encoding="utf-8")
 
-        context = collect_impact_context(collect_changes(repo, staged=True))
+        context = collect_impact_context(collect_changes(repo, staged=True), max_files=1)
 
         self.assertIn("invoice.py", {item["file"] for item in context["affected_locations"]})
+        self.assertNotIn("archive.pdf", {item["file"] for item in context["affected_locations"]})
+        self.assertNotIn("generated/caller.py", {item["file"] for item in context["affected_locations"]})
 
     def test_documentation_only_change_takes_an_empty_fast_path(self) -> None:
         repo = self.make_repo()

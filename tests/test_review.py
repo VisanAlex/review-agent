@@ -119,6 +119,43 @@ class ConsolidationTests(unittest.TestCase):
 
         self.assertIsNone(finding_from_mapping("reviewer", "context", value))
 
+    def test_changed_files_are_removed_from_affected_unchanged_locations(self) -> None:
+        reviewer = run(
+            "correctness-1",
+            "ctx-1",
+            ReviewerRole.CORRECTNESS,
+            [
+                raw_finding(
+                    "Changed default breaks callers",
+                    file="pricing.py",
+                    affected_locations=[
+                        {
+                            "file": "checkout.py",
+                            "line": 18,
+                            "relationship": "Changed caller uses calculate_total.",
+                        },
+                        {
+                            "file": "invoice.py",
+                            "line": 21,
+                            "relationship": "Unchanged caller uses calculate_total.",
+                        },
+                    ],
+                )
+            ],
+        )
+
+        review = consolidate(
+            [reviewer],
+            source="working tree",
+            plan=plan(ReviewerRole.CORRECTNESS),
+            changed_files={"pricing.py", "checkout.py"},
+        )
+
+        self.assertEqual(
+            [location.file for location in review.findings[0].affected_locations],
+            ["invoice.py"],
+        )
+
     def test_merged_findings_union_affected_locations(self) -> None:
         first = run(
             "correctness-1",
