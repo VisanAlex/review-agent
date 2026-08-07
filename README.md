@@ -64,6 +64,8 @@ Installing another agent CLI never changes this behavior. Review Agent does not 
 
 The parent inspects the change and selects only justified roles from correctness, testing, security, data integrity, API compatibility, frontend/accessibility, concurrency/reliability, performance, architecture, dependency/supply-chain, deployment/operations, and internationalization. The roles are language-independent. Documentation-only changes can intentionally use no specialist roster.
 
+Before selecting those roles, a fixed `impact-mapper` traces changed symbols and contracts into unchanged callers, consumers, tests, templates, adapters, and integrations. It is a pipeline component, not a 13th agent. The helper supplies a bounded cross-language text-reference fallback; hosts with code intelligence can refine it with semantic references. Every candidate must be verified before use.
+
 If native subagents are unavailable or denied, the parent runs the selected lenses sequentially and labels the result `single-agent-fallback`. Those passes share one context and are never presented as independent agreement.
 
 ## Reviewer depth
@@ -126,7 +128,7 @@ Installation compatibility and runtime subagent capability are separate. The rep
 
 ## Optional helper commands
 
-These commands run Git and deterministic validation only. They do not call a model:
+These commands run Git and bounded deterministic read-only analysis. They do not call a model:
 
 ```powershell
 review-agent doctor
@@ -137,6 +139,8 @@ review-agent context --format prompt --role security
 ```
 
 `review-agent consolidate --plan <plan.json> --result <result.json>` validates reviewer results, removes unsupported/off-diff findings, deduplicates likely matches, and renders the final report. The `external` command calls the explicitly authorized model target and is normally owned by the skill. It accepts either the direct `--role` plus Git-scope form shown above or the lower-level `--assignment <file>` form.
+
+The JSON context includes `impact_context.changed_identifiers` and bounded `impact_context.affected_locations`. Those locations are unverified candidates, not findings. A published finding still uses a changed file as its primary root cause and may attach verified unchanged consumers through its own `affected_locations` array.
 
 Check an optional adapter without sending repository context:
 
@@ -198,7 +202,7 @@ Every report names its real execution mode:
 - `hybrid-native-external`: native specialists plus explicit external review.
 - `hybrid-fallback-external`: sequential fallback plus explicit external review.
 
-Raw reviewer findings are never published directly. The parent must reopen the changed code and verify the literal path, location, evidence, trigger, affected behavior, and change causality before deduplication and severity calibration. Agreement counts only when distinct context IDs support the same verified defect.
+Raw reviewer findings are never published directly. The parent must reopen the changed root cause and every claimed affected location, then verify the literal paths, locations, evidence, trigger, affected behavior, relationship, and change causality before deduplication and severity calibration. Agreement counts only when distinct context IDs support the same verified defect.
 
 See [How it works](docs/how-it-works.md) for the execution and security contracts.
 
@@ -228,4 +232,4 @@ export PATH="$HOME/.local/bin:$PATH"
 review-agent --version
 ```
 
-The expected result is `review-agent 0.4.0` or newer. The package retains a legacy setuptools metadata fallback for older Ubuntu Python packaging stacks while using `pyproject.toml` on modern installers.
+The expected result is `review-agent 0.5.0` or newer. The package retains a legacy setuptools metadata fallback for older Ubuntu Python packaging stacks while using `pyproject.toml` on modern installers.

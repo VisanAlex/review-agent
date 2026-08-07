@@ -287,6 +287,7 @@ def recommend_roles(
     changes: ChangeSet,
     *,
     policy: ReviewPolicy | None = None,
+    additional_signals: set[str] | None = None,
 ) -> ReviewPlan:
     policy = policy or ReviewPolicy()
     if policy.max_reviewers < 1:
@@ -298,7 +299,7 @@ def recommend_roles(
         names = ", ".join(sorted(role.value for role in overlap))
         raise ValueError(f"roles cannot be both included and excluded: {names}")
 
-    signals = derive_risk_signals(changes)
+    signals = derive_risk_signals(changes) | set(additional_signals or ())
     automatic = _automatic_roles(signals)
     candidates = [*include, *[role for role in ROLE_ORDER if role in automatic and role not in include]]
     selected_roles = [role for role in candidates if role not in exclude][: policy.max_reviewers]

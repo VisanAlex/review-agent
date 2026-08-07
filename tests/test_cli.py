@@ -177,6 +177,9 @@ class CliTests(unittest.TestCase):
         self.assertFalse(repository_context["trusted"])
         self.assertEqual(len(repository_context["invariants"]), 1)
         self.assertEqual(len(repository_context["incidents"]), 1)
+        impact_context = document["change_context"]["impact_context"]
+        self.assertFalse(impact_context["trusted"])
+        self.assertIn("VALUE", impact_context["changed_identifiers"])
         self.assertFalse((repo / ".review-agent-state").exists())
 
     def test_context_prompt_builds_one_bounded_role_assignment(self) -> None:
@@ -199,6 +202,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("correctness specialist", stdout.getvalue())
         self.assertIn("untrusted data", stdout.getvalue())
         self.assertIn("The public value must remain stable", stdout.getvalue())
+        self.assertIn("IMPACT CONTEXT", stdout.getvalue())
 
     def test_consolidate_validates_results_and_writes_both_formats(self) -> None:
         repo = self.make_repo()

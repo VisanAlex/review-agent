@@ -20,6 +20,7 @@ def raw_finding(
     line: int = 44,
     severity: str = "high",
     explanation: str = "The changed flow persists before authorization.",
+    affected_locations: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     return {
         "title": title,
@@ -33,6 +34,7 @@ def raw_finding(
         "suggested_fix": "Authorize before saving.",
         "test_direction": "Add a denied-caller regression test.",
         "confidence": 0.9,
+        "affected_locations": affected_locations or [],
     }
 
 
@@ -72,6 +74,128 @@ def plan(*roles: ReviewerRole) -> ReviewPlan:
 
 
 class ConsolidationTests(unittest.TestCase):
+    def test_unchanged_consumers_are_preserved_as_affected_locations(self) -> None:
+        reviewer = run(
+            "correctness-1",
+            "ctx-1",
+            ReviewerRole.CORRECTNESS,
+            [
+                raw_finding(
+                    "Changed default breaks invoice callers",
+                    file="pricing.py",
+                    affected_locations=[
+                        {
+                            "file": "invoice.py",
+                            "line": 18,
+                            "relationship": "Calls changed calculate_total behavior.",
+                        }
+                    ],
+                )
+            ],
+        )
+
+        review = consolidate(
+            [reviewer],
+            source="working tree",
+            plan=plan(ReviewerRole.CORRECTNESS),
+            changed_files={"pricing.py"},
+        )
+
+        self.assertEqual(review.findings[0].file, "pricing.py")
+        self.assertEqual(review.findings[0].affected_locations[0].file, "invoice.py")
+        self.assertIn("Affected unchanged locations", render_markdown(review))
+
+    def test_affected_locations_reject_unsafe_paths(self) -> None:
+        value = raw_finding(
+            "Unsafe affected path",
+            affected_locations=[
+                {
+                    "file": "../outside.py",
+                    "line": 1,
+                    "relationship": "References changed behavior.",
+                }
+            ],
+        )
+
+        self.assertIsNone(finding_from_mapping("reviewer", "context", value))
+
+    def test_changed_files_are_removed_from_affected_unchanged_locations(self) -> None:
+        reviewer = run(
+            "correctness-1",
+            "ctx-1",
+            ReviewerRole.CORRECTNESS,
+            [
+                raw_finding(
+                    "Changed default breaks callers",
+                    file="pricing.py",
+                    affected_locations=[
+                        {
+                            "file": "checkout.py",
+                            "line": 18,
+                            "relationship": "Changed caller uses calculate_total.",
+                        },
+                        {
+                            "file": "invoice.py",
+                            "line": 21,
+                            "relationship": "Unchanged caller uses calculate_total.",
+                        },
+                    ],
+                )
+            ],
+        )
+
+        review = consolidate(
+            [reviewer],
+            source="working tree",
+            plan=plan(ReviewerRole.CORRECTNESS),
+            changed_files={"pricing.py", "checkout.py"},
+        )
+
+        self.assertEqual(
+            [location.file for location in review.findings[0].affected_locations],
+            ["invoice.py"],
+        )
+
+    def test_merged_findings_union_affected_locations(self) -> None:
+        first = run(
+            "correctness-1",
+            "ctx-1",
+            ReviewerRole.CORRECTNESS,
+            [
+                raw_finding(
+                    "Authorization happens after mutation",
+                    affected_locations=[
+                        {"file": "api.py", "line": 9, "relationship": "Calls save_order."}
+                    ],
+                )
+            ],
+        )
+        second = run(
+            "security-1",
+            "ctx-2",
+            ReviewerRole.SECURITY,
+            [
+                raw_finding(
+                    "Mutation occurs before authorization",
+                    line=45,
+                    affected_locations=[
+                        {"file": "worker.py", "line": 21, "relationship": "Calls save_order."}
+                    ],
+                )
+            ],
+        )
+
+        review = consolidate(
+            [first, second],
+            source="working tree",
+            plan=plan(ReviewerRole.CORRECTNESS, ReviewerRole.SECURITY),
+        )
+
+        self.assertEqual(
+            {location.file for location in review.findings[0].affected_locations},
+            {"api.py", "worker.py"},
+        )
+
     def test_similar_findings_from_distinct_contexts_are_corroborated(self) -> None:
         first = run(
             "correctness-1",
