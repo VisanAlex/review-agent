@@ -116,6 +116,7 @@ class CanonicalSkillContractTests(unittest.TestCase):
         text = self.read("references/reviewer-contract.md").lower()
         stages = [
             "change-mapper",
+            "impact-mapper",
             "role-selector",
             "finding-verifier",
             "deduplicator",
@@ -126,6 +127,14 @@ class CanonicalSkillContractTests(unittest.TestCase):
         self.assertEqual(offsets, sorted(offsets))
         self.assertIn("raw reviewer findings are never publishable", text)
         self.assertIn("mandatory", text)
+
+    def test_impact_mapper_tracks_unchanged_consumers_without_expanding_root_cause_scope(self) -> None:
+        text = self.read("references/reviewer-contract.md").lower()
+        self.assertIn("code intelligence", text)
+        self.assertIn("portable reference search", text)
+        self.assertIn("affected_locations", text)
+        self.assertIn("primary `file`", text)
+        self.assertIn("changed root cause", text)
 
     def test_references_are_one_level_and_linked_from_skill(self) -> None:
         skill_text = self.read("SKILL.md")

@@ -19,6 +19,7 @@ class ChangeSet:
     files: list[str]
     languages: list[str]
     truncated: bool
+    snapshot_ref: str | None = None
 
 
 LANGUAGES = {
@@ -149,14 +150,17 @@ def collect_changes(
         name_args = ("diff", "--name-only", "-z", merge_base, head)
         mode = "committed"
         source = f"{merge_base}...{head} (base {base})"
+        snapshot_ref = head
     elif staged:
         diff_args = ("diff", "--cached", "--no-ext-diff", "--find-renames", "--unified=40")
         name_args = ("diff", "--cached", "--name-only", "-z")
         mode = "staged"
         source = "Git index"
+        snapshot_ref = None
     else:
         mode = "working-tree"
         source = "HEAD plus staged, unstaged, and untracked changes"
+        snapshot_ref = None
         untracked = _untracked_files(repo)
         try:
             _git(repo, "rev-parse", "--verify", "HEAD")
@@ -209,4 +213,5 @@ def collect_changes(
         files=files,
         languages=languages,
         truncated=truncated,
+        snapshot_ref=snapshot_ref,
     )

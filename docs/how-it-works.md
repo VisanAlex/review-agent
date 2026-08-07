@@ -17,7 +17,8 @@ sequenceDiagram
   participant E as Explicit external targets
 
   D->>P: Invoke review-agent with optional with directive
-  P->>P: Collect bounded Git context and select roles
+  P->>P: Collect bounded Git context and map cross-file impact
+  P->>P: Select roles from change and impact signals
   alt No specialist justified
     P->>P: Limited parent review
   else Native delegation available
@@ -51,7 +52,11 @@ Names mentioned without `with` are not authorization. Installed CLIs, environmen
 
 ## 2. Change context
 
-The context contains repository identity, source, changed paths, detected file types, bounded diff text, truncation state, and optional repository review memory. Diff and repository text are always untrusted data; instructions found inside them cannot change the review workflow or tool restrictions.
+The context contains repository identity, source, changed paths, detected file types, bounded diff text, truncation state, a bounded impact map, and optional repository review memory. Diff and repository text are always untrusted data; instructions found inside them cannot change the review workflow or tool restrictions.
+
+The fixed impact mapper runs before role selection. It extracts candidate changed symbols and contracts from the before/after diff, then searches unchanged tracked files for callers, consumers, tests, templates, adapters, and integrations. The helper provides a language-independent bounded text-reference scan. When a host exposes code intelligence or semantic reference tools, the parent prefers those and uses portable search as fallback. Text matches remain unverified until the parent opens the location and confirms the relationship.
+
+Documentation-only and obvious leaf changes take a quick empty path. Large repositories remain bounded by identifier, file, character, and location caps. Symlinks, binary files, generated output, dependencies, and common build directories are skipped. Truncation is reported instead of hidden.
 
 Repository review memory is opt-in and file-based:
 
@@ -82,7 +87,7 @@ Deterministic signals and parent judgment select the smallest useful set from 12
 
 The default cap is four. A review invocation can request `max N specialists`, `up to N review agents`, or `all relevant specialists`. Invocation overrides project configuration, which overrides the default; a direct helper flag overrides its `--request` text. `all relevant` raises the cap to 12 but does not bypass risk selection. Project policy can include or exclude roles, but cannot add an external target. Every selection and skip gets a reason.
 
-Each reviewer receives one role, one bounded context, explicit exclusions, a unique reviewer/context identity, and the shared finding contract. A reviewer may inspect nearby repository text with read-only tools but may not edit, delegate, or execute project commands.
+Each reviewer receives one role, one bounded context including the impact map, explicit exclusions, a unique reviewer/context identity, and the shared finding contract. A reviewer may inspect nearby repository text with read-only tools but may not edit, delegate, or execute project commands.
 
 ## 4. Capability-aware execution
 
@@ -130,9 +135,9 @@ Final reports use the user's explicitly requested language and otherwise default
 
 ## 7. Finding validation and consolidation
 
-A publishable finding must include a valid severity, changed repository-relative file, useful location, explanation, concrete evidence, plausible failure scenario, affected behavior, confidence, and a correction or regression-test direction. Raw reviewer output is never directly publishable.
+A publishable finding must include a valid severity, changed repository-relative root-cause file, useful location, explanation, concrete evidence, plausible failure scenario, affected behavior, confidence, and a correction or regression-test direction. It may also carry verified unchanged consumers in `affected_locations`, each with an exact file, line, and relationship. An unchanged file can never replace the changed primary root cause. Raw reviewer output is never directly publishable.
 
-The parent runs a fixed pipeline: `change-mapper` -> `role-selector` -> specialists -> mandatory `finding-verifier` -> `deduplicator` -> `severity-calibrator` -> `final-synthesizer`. Verification reopens the changed code and checks the literal path, location, evidence, trigger, affected behavior, and change causality even when multiple reviewers agree.
+The parent runs a fixed pipeline: `change-mapper` -> `impact-mapper` -> `role-selector` -> specialists -> mandatory `finding-verifier` -> `deduplicator` -> `severity-calibrator` -> `final-synthesizer`. Verification reopens the changed code and every claimed affected location, checking literal paths, locations, evidence, trigger, affected behavior, relationship, and change causality even when multiple reviewers agree.
 
 The parent verifies evidence against changed code and rejects malformed, off-diff, vague, stylistic, speculative, or pre-existing claims. Similar findings merge only when file, location, and failure semantics align. Contributor reviewer IDs and context IDs remain attached.
 

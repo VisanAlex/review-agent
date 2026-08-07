@@ -40,6 +40,7 @@ FINDINGS = {
             "evidence": "The new branch accepts an invalid state.",
             "failure_scenario": "An invalid request reaches the protected operation.",
             "affected_behavior": "Authorization no longer rejects the request.",
+            "affected_locations": [],
             "suggested_fix": "Reverse the comparison.",
             "test_direction": "Assert the invalid request is rejected.",
             "confidence": 0.9,

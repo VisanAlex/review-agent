@@ -16,6 +16,7 @@ from .external import (
     run_external_reviews,
 )
 from .git_changes import ChangeCollectionError, ChangeSet, collect_changes, repository_root
+from .impact import collect_impact_context
 from .models import (
     ReviewerAssignment,
     ReviewerRole,
@@ -153,7 +154,21 @@ def _changes(args: argparse.Namespace, config: dict[str, Any]) -> ChangeSet:
     )
 
 
-def _context_document(changes: ChangeSet, plan: ReviewPlan) -> dict[str, Any]:
+def _recommend_with_impact(
+    changes: ChangeSet,
+    policy: ReviewPolicy,
+) -> tuple[ReviewPlan, dict[str, Any]]:
+    impact_context = collect_impact_context(changes)
+    impact_signals = {"cross-file-impact"} if impact_context["affected_locations"] else set()
+    plan = recommend_roles(changes, policy=policy, additional_signals=impact_signals)
+    return plan, impact_context
+
+
+def _context_document(
+    changes: ChangeSet,
+    plan: ReviewPlan,
+    impact_context: dict[str, Any],
+) -> dict[str, Any]:
     repository_context = collect_repository_context(
         changes.repo,
         changed_files=changes.files,
@@ -172,6 +187,7 @@ def _context_document(changes: ChangeSet, plan: ReviewPlan) -> dict[str, Any]:
             "diff": changes.diff,
             "diff_trusted": False,
             "truncated": changes.truncated,
+            "impact_context": impact_context,
             "repository_context": repository_context,
         },
         "review_plan": plan.to_dict(),
@@ -368,7 +384,7 @@ def _install_skills(args: argparse.Namespace) -> int:
     return 0
 
 
-def _prepare(args: argparse.Namespace) -> tuple[ChangeSet, ReviewPlan]:
+def _prepare(args: argparse.Namespace) -> tuple[ChangeSet, ReviewPlan, dict[str, Any]]:
     args.repo = repository_root(args.repo)
     config = load_config(args.repo)
     changes = _changes(args, config)
@@ -395,14 +411,14 @@ def _prepare(args: argparse.Namespace) -> tuple[ChangeSet, ReviewPlan]:
         include_roles=policy.include_roles,
         exclude_roles=policy.exclude_roles,
     )
-    plan = recommend_roles(changes, policy=policy)
+    plan, impact_context = _recommend_with_impact(changes, policy)
     plan.reviewer_limit_source = source
-    return changes, plan
+    return changes, plan, impact_context
 
 
 def _plan(args: argparse.Namespace) -> int:
-    changes, plan = _prepare(args)
-    document = _context_document(changes, plan)
+    changes, plan, impact_context = _prepare(args)
+    document = _context_document(changes, plan, impact_context)
     if args.format == "json":
         print(json.dumps(document, indent=2, ensure_ascii=False))
         return 0
@@ -414,6 +430,11 @@ def _plan(args: argparse.Namespace) -> int:
     print(f"Languages/file types: {', '.join(changes.languages) or 'none'}")
     print(f"Diff characters: {len(changes.diff)}{' (truncated)' if changes.truncated else ''}")
     print(f"Risk signals: {', '.join(plan.risk_signals) or 'none'}")
+    print(
+        "Impact candidates: "
+        f"{len(impact_context['affected_locations'])} location(s) across "
+        f"{len({item['file'] for item in impact_context['affected_locations']})} unchanged file(s)"
+    )
     print(f"Reviewer limit: {plan.max_reviewers} ({plan.reviewer_limit_source})")
     print("Selected specialists:")
     if plan.selected_roles:
@@ -430,8 +451,8 @@ def _plan(args: argparse.Namespace) -> int:
 
 
 def _context(args: argparse.Namespace) -> int:
-    changes, plan = _prepare(args)
-    document = _context_document(changes, plan)
+    changes, plan, impact_context = _prepare(args)
+    document = _context_document(changes, plan, impact_context)
     if args.format == "json":
         print(json.dumps(document, indent=2, ensure_ascii=False))
         return 0
@@ -448,6 +469,7 @@ def _context(args: argparse.Namespace) -> int:
             role,
             focus,
             repository_context=document["change_context"]["repository_context"],
+            impact_context=impact_context,
         )
     )
     return 0
@@ -606,7 +628,7 @@ def _external(args: argparse.Namespace) -> int:
             raise ConfigError("external requires --role or --assignment after a target is authorized")
         args.repo = repo
         changes = _changes(args, config)
-        plan = recommend_roles(changes, policy=_policy(config))
+        plan, impact_context = _recommend_with_impact(changes, _policy(config))
         role = ReviewerRole(args.role)
         recommendation = next(
             (item for item in plan.selected_roles if item.role is role),
@@ -628,7 +650,7 @@ def _external(args: argparse.Namespace) -> int:
                 "Do not run tests, builds, package managers, project scripts, or arbitrary commands.",
                 "Do not report generic style advice or defects outside the supplied change.",
             ],
-            change_context=_context_document(changes, plan)["change_context"],
+            change_context=_context_document(changes, plan, impact_context)["change_context"],
         )
 
     print(f"External targets: {', '.join(targets)}", file=sys.stderr)

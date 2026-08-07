@@ -130,6 +130,13 @@ class ReviewerAssignment:
 
 
 @dataclass
+class AffectedLocation:
+    file: str
+    line: int | None
+    relationship: str
+
+
+@dataclass
 class Finding:
     title: str
     severity: str
@@ -142,6 +149,7 @@ class Finding:
     suggested_fix: str
     test_direction: str
     confidence: float
+    affected_locations: list[AffectedLocation] = field(default_factory=list)
     reviewer_ids: list[str] = field(default_factory=list)
     context_ids: list[str] = field(default_factory=list)
 
