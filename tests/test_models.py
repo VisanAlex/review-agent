@@ -3,6 +3,11 @@ from __future__ import annotations
 import unittest
 
 from review_agent.models import (
+    BrowserAuthMethod,
+    BrowserCheck,
+    BrowserCheckStatus,
+    BrowserVerificationRun,
+    BrowserVerificationStatus,
     ExecutionMode,
     ExecutionOrigin,
     Finding,
@@ -16,6 +21,37 @@ from review_agent.models import (
 
 
 class ReviewModelTests(unittest.TestCase):
+    def test_browser_coverage_is_serialized_separately_from_reviewers(self) -> None:
+        browser = BrowserVerificationRun(
+            status=BrowserVerificationStatus.COMPLETED,
+            target="host-browser",
+            display_url="https://staging.example.test",
+            auth_method=BrowserAuthMethod.EXISTING_SESSION,
+            checks=[
+                BrowserCheck(
+                    name="Open address book",
+                    status=BrowserCheckStatus.PASSED,
+                    route="/address-book",
+                    reproduction_steps=["Open the address book"],
+                    expected="The widget loads.",
+                    observed="The widget loaded.",
+                    evidence="The widget heading was visible.",
+                )
+            ],
+        )
+        result = ReviewResult(
+            source="working tree",
+            execution_mode=ExecutionMode.NATIVE_MULTI_AGENT,
+            plan=ReviewPlan(source="working tree", selected_roles=[], skipped_roles=[]),
+            findings=[],
+            reviewer_runs=[],
+            browser_verification=browser,
+        )
+
+        document = result.to_dict()
+        self.assertEqual(document["browser_verification"]["status"], "completed")
+        self.assertEqual(document["reviewers"], [])
+
     def test_reviewer_roster_has_twelve_behavioral_roles(self) -> None:
         self.assertEqual(len(ReviewerRole), 12)
 
