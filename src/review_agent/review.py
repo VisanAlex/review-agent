@@ -635,20 +635,17 @@ def render_markdown(review: ReviewResult) -> str:
         )
         lines.append("")
 
-    lines.extend(
-        [
-            "## Summary",
-            "",
-            f"{len(review.findings)} finding(s), {review.corroborated_count} corroborated by distinct contexts.",
-            "",
-        ]
+    summary = (
+        f"{len(review.findings)} finding(s), "
+        f"{review.corroborated_count} corroborated by distinct contexts."
     )
     if review.browser_verification is not None and review.browser_verification.checks:
         passed, failed, skipped = _browser_status_counts(review.browser_verification)
-        lines[-2] = (
-            f"{lines[-2][:-1]} Browser verification: "
+        summary += (
+            " Browser verification: "
             f"{passed} passed, {failed} failed, {skipped} skipped."
         )
+    lines.extend(["## Summary", "", summary, ""])
     return "\n".join(lines)
 
 
