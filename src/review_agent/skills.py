@@ -30,6 +30,7 @@ MANAGED_FILES = (
     "references/reviewer-roles.md",
     "references/host-capabilities.md",
     "references/external-reviewers.md",
+    "references/browser-verification.md",
 )
 
 
