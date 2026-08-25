@@ -3,7 +3,9 @@ from __future__ import annotations
 import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
+from review_agent.browser import browser_run_from_mapping, sanitize_http_url
 from review_agent.external import parse_external_targets
 from review_agent.git_changes import ChangeSet
 from review_agent.models import (
@@ -14,7 +16,7 @@ from review_agent.models import (
     ReviewerStatus,
 )
 from review_agent.planning import recommend_roles
-from review_agent.review import consolidate
+from review_agent.review import consolidate, render_json, render_markdown
 
 
 def change(*files: str, diff: str = "+def changed():\n+    return True\n") -> ChangeSet:
@@ -38,6 +40,95 @@ class FakeHost:
     external_outcomes: dict[str, ReviewerStatus] = field(default_factory=dict)
     native_dispatches: list[tuple[str, str]] = field(default_factory=list)
     external_dispatches: list[str] = field(default_factory=list)
+    browser_available: bool = False
+    browser_consent: bool | None = None
+    authenticated_session: bool = False
+    environment_auth: bool = False
+    interactive_auth: bool = False
+    environment_secret: str | None = None
+    browser_url: str = "https://staging.example.test/"
+    browser_check_status: str = "passed"
+    mutating_flow: bool = False
+    browser_prompts: int = 0
+    browser_navigation: list[str] = field(default_factory=list)
+    auth_attempts: list[str] = field(default_factory=list)
+    approved_environment_names: list[str] = field(default_factory=list)
+    events: list[str] = field(default_factory=list)
+
+    def browser_verification(self, plan):
+        if "frontend-accessibility" not in plan.risk_signals:
+            return None
+        self.events.append("static-verified")
+        self.browser_prompts += 1
+        self.events.append("browser-prompt")
+        if not self.browser_consent:
+            return browser_run_from_mapping({"schema_version": 1, "status": "declined"})
+        if not self.browser_available:
+            return browser_run_from_mapping(
+                {
+                    "schema_version": 1,
+                    "status": "unavailable",
+                    "limitations": ["The current host exposes no browser capability."],
+                }
+            )
+
+        self.auth_attempts.append("existing-session")
+        auth_method = None
+        if self.authenticated_session:
+            auth_method = "existing-session"
+        else:
+            self.auth_attempts.append("environment")
+            if self.environment_auth:
+                self.approved_environment_names = [
+                    "REVIEW_AGENT_BROWSER_EMAIL",
+                    "REVIEW_AGENT_BROWSER_PASSWORD",
+                ]
+                auth_method = "environment"
+            else:
+                self.auth_attempts.append("interactive")
+                if self.interactive_auth:
+                    auth_method = "interactive"
+        if auth_method is None:
+            return browser_run_from_mapping(
+                {
+                    "schema_version": 1,
+                    "status": "unavailable",
+                    "limitations": ["Authentication was not available without user interaction."],
+                }
+            )
+
+        display_url = sanitize_http_url(self.browser_url, label="browser fixture URL")
+        self.browser_navigation.append(display_url)
+        check_status = "skipped" if self.mutating_flow else self.browser_check_status
+        observed = (
+            "Skipped because the flow would mutate meaningful data."
+            if self.mutating_flow
+            else "The affected interface matched the expected behavior."
+        )
+        return browser_run_from_mapping(
+            {
+                "schema_version": 1,
+                "status": "completed",
+                "target": f"{self.name}-browser",
+                "display_url": display_url,
+                "auth_method": auth_method,
+                "duration_seconds": 1.0,
+                "checks": [
+                    {
+                        "name": "Affected frontend flow",
+                        "status": check_status,
+                        "route": urlsplit(display_url).path or "/",
+                        "reproduction_steps": ["Open the affected route."],
+                        "expected": "The changed interface behaves correctly.",
+                        "observed": observed,
+                        "evidence": observed,
+                        "artifacts": [],
+                    }
+                ],
+                "limitations": [observed] if self.mutating_flow else [],
+                "error": None,
+            }
+        )
 
     def review(self, changes: ChangeSet, request: str = "Review these changes"):
         plan = recommend_roles(changes)
@@ -88,10 +179,124 @@ class FakeHost:
                     error=None if status is ReviewerStatus.SUCCEEDED else f"{target} unavailable",
                 )
             )
-        return consolidate(runs, source=changes.source, plan=plan, changed_files=set(changes.files))
+        browser = self.browser_verification(plan)
+        return consolidate(
+            runs,
+            source=changes.source,
+            plan=plan,
+            changed_files=set(changes.files),
+            browser_verification=browser,
+        )
 
 
 class ProductAcceptanceTests(unittest.TestCase):
+    def test_browser_ae1_frontend_prompts_once_after_static_verification(self) -> None:
+        host = FakeHost("codex", True, browser_available=True, browser_consent=True, authenticated_session=True)
+
+        result = host.review(change("component.tsx"))
+
+        self.assertEqual(host.browser_prompts, 1)
+        self.assertLess(host.events.index("static-verified"), host.events.index("browser-prompt"))
+        self.assertEqual(result.browser_verification.status.value, "completed")
+
+    def test_browser_ae2_backend_change_never_prompts_or_reports_browser_coverage(self) -> None:
+        host = FakeHost("claude", True, browser_available=True, browser_consent=True)
+
+        result = host.review(change("service.py"))
+
+        self.assertEqual(host.browser_prompts, 0)
+        self.assertIsNone(result.browser_verification)
+        self.assertNotIn("Browser coverage", render_markdown(result))
+
+    def test_browser_ae3_decline_stops_before_target_auth_or_browser_work(self) -> None:
+        host = FakeHost("cursor", True, browser_available=True, browser_consent=False)
+
+        result = host.review(change("component.vue"))
+
+        self.assertEqual(result.browser_verification.status.value, "declined")
+        self.assertEqual(host.browser_navigation, [])
+        self.assertEqual(host.auth_attempts, [])
+
+    def test_browser_ae4_existing_session_precedes_environment_auth(self) -> None:
+        host = FakeHost(
+            "codex",
+            True,
+            browser_available=True,
+            browser_consent=True,
+            authenticated_session=True,
+            environment_auth=True,
+        )
+
+        result = host.review(change("dashboard.tsx"))
+
+        self.assertEqual(host.auth_attempts, ["existing-session"])
+        self.assertEqual(result.browser_verification.auth_method.value, "existing-session")
+
+    def test_browser_ae5_environment_auth_never_serializes_secret_values(self) -> None:
+        secret = "browser-password-sentinel"
+        host = FakeHost(
+            "claude",
+            True,
+            browser_available=True,
+            browser_consent=True,
+            environment_auth=True,
+            environment_secret=secret,
+        )
+
+        result = host.review(change("login-form.tsx"))
+        output = render_json(result) + render_markdown(result)
+
+        self.assertEqual(
+            host.approved_environment_names,
+            ["REVIEW_AGENT_BROWSER_EMAIL", "REVIEW_AGENT_BROWSER_PASSWORD"],
+        )
+        self.assertEqual(result.browser_verification.auth_method.value, "environment")
+        self.assertNotIn(secret, output)
+
+    def test_browser_ae6_and_ae7_unavailable_coverage_preserves_static_results(self) -> None:
+        for host in [
+            FakeHost("kiro", True, browser_consent=True, browser_available=False),
+            FakeHost("cursor", True, browser_consent=True, browser_available=True),
+        ]:
+            with self.subTest(host=host.name, capability=host.browser_available):
+                result = host.review(change("component.tsx"))
+                self.assertEqual(result.browser_verification.status.value, "unavailable")
+                self.assertTrue(result.successful_reviewer_ids)
+                self.assertEqual(result.execution_mode, ExecutionMode.NATIVE_MULTI_AGENT)
+
+    def test_browser_ae8_failed_runtime_observation_does_not_invent_code_finding(self) -> None:
+        host = FakeHost(
+            "codex",
+            True,
+            browser_available=True,
+            browser_consent=True,
+            authenticated_session=True,
+            browser_check_status="failed",
+        )
+
+        result = host.review(change("modal.tsx"))
+
+        self.assertEqual(result.browser_verification.checks[0].status.value, "failed")
+        self.assertEqual(result.findings, [])
+
+    def test_browser_ae9_and_ae10_sanitize_target_and_skip_mutating_flow(self) -> None:
+        host = FakeHost(
+            "claude",
+            True,
+            browser_available=True,
+            browser_consent=True,
+            authenticated_session=True,
+            browser_url="https://staging.example.test/settings?token=hidden#profile",
+            mutating_flow=True,
+        )
+
+        result = host.review(change("settings.vue"))
+        output = render_json(result) + render_markdown(result)
+
+        self.assertEqual(result.browser_verification.display_url, "https://staging.example.test/settings")
+        self.assertEqual(result.browser_verification.checks[0].status.value, "skipped")
+        self.assertNotIn("token=hidden", output)
+
     def test_ae1_codex_native_uses_only_codex_without_external_consent(self) -> None:
         host = FakeHost("codex", True, installed_external_tools={"claude"})
         result = host.review(change("app.py"))
@@ -158,6 +363,24 @@ class ProductAcceptanceTests(unittest.TestCase):
 
 
 class DocumentationAcceptanceTests(unittest.TestCase):
+    def test_docs_cover_browser_prompt_auth_safety_and_coverage(self) -> None:
+        root = Path(__file__).parents[1]
+        combined = (
+            (root / "README.md").read_text(encoding="utf-8")
+            + (root / "docs" / "how-it-works.md").read_text(encoding="utf-8")
+        )
+        for text in [
+            "Frontend changes detected. Run browser verification?",
+            "REVIEW_AGENT_BROWSER_",
+            "existing session",
+            "interactive sign-in",
+            "declined",
+            "unavailable",
+            "failed",
+            "completed",
+            "non-destructive",
+        ]:
+            self.assertIn(text, combined)
     def test_docs_cover_primary_hosts_optional_external_review_and_real_modes(self) -> None:
         root = Path(__file__).parents[1]
         readme = (root / "README.md").read_text(encoding="utf-8")
