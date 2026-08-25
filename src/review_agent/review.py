@@ -4,6 +4,7 @@ import json
 import math
 import re
 from dataclasses import replace
+from html import escape
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -461,6 +462,15 @@ def _safe_table(value: str) -> str:
     return value.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 
 
+_MARKDOWN_CONTROL = re.compile(r"([\\*_{}\[\]()#+!|>\-])")
+
+
+def _safe_markdown(value: str) -> str:
+    single_line = value.replace("\r", " ").replace("\n", " ")
+    escaped = escape(single_line, quote=False).replace("`", "&#96;")
+    return _MARKDOWN_CONTROL.sub(r"\\\1", escaped)
+
+
 def _browser_status_counts(browser: BrowserVerificationRun) -> tuple[int, int, int]:
     return (
         sum(check.status is BrowserCheckStatus.PASSED for check in browser.checks),
@@ -475,17 +485,17 @@ def _render_browser_coverage(browser: BrowserVerificationRun) -> list[str]:
         lines.extend(["", "Browser verification was offered and declined."])
         return lines
     if browser.target:
-        lines.append(f"Target: `{browser.target}`")
+        lines.append(f"Target: {_safe_markdown(browser.target)}")
     if browser.display_url:
-        lines.append(f"URL: `{browser.display_url}`")
+        lines.append(f"URL: {_safe_markdown(browser.display_url)}")
     if browser.auth_method:
         lines.append(f"Authentication: `{browser.auth_method.value}`")
     lines.append(f"Duration: {browser.duration_seconds:.1f}s")
     if browser.error:
-        lines.extend(["", f"Error: {browser.error}"])
+        lines.extend(["", f"Error: {_safe_markdown(browser.error)}"])
     if browser.limitations:
         lines.extend(["", "Limitations:"])
-        lines.extend(f"- {limitation}" for limitation in browser.limitations)
+        lines.extend(f"- {_safe_markdown(limitation)}" for limitation in browser.limitations)
     if browser.checks:
         passed, failed, skipped = _browser_status_counts(browser)
         lines.extend(
@@ -499,31 +509,34 @@ def _render_browser_coverage(browser: BrowserVerificationRun) -> list[str]:
         )
         for check in browser.checks:
             lines.append(
-                f"| {_safe_table(check.name)} | {check.status.value} | "
-                f"`{_safe_table(check.route)}` | {_safe_table(check.evidence)} |"
+                f"| {_safe_markdown(check.name)} | {check.status.value} | "
+                f"{_safe_markdown(check.route)} | {_safe_markdown(check.evidence)} |"
             )
         for check in browser.checks:
             if check.status is BrowserCheckStatus.PASSED:
                 continue
-            lines.extend(["", f"### {check.status.value.title()}: {check.name}", ""])
+            lines.extend(
+                ["", f"### {check.status.value.title()}: {_safe_markdown(check.name)}", ""]
+            )
             if check.reproduction_steps:
                 lines.append("Reproduction:")
                 lines.extend(
-                    f"{index}. {step}"
+                    f"{index}. {_safe_markdown(step)}"
                     for index, step in enumerate(check.reproduction_steps, 1)
                 )
                 lines.append("")
             lines.extend(
                 [
-                    f"Expected: {check.expected}",
+                    f"Expected: {_safe_markdown(check.expected)}",
                     "",
-                    f"Observed: {check.observed}",
+                    f"Observed: {_safe_markdown(check.observed)}",
                 ]
             )
             if check.artifacts:
                 lines.extend(["", "Artifacts:"])
                 lines.extend(
-                    f"- `{artifact.path}` - {artifact.description}" for artifact in check.artifacts
+                    f"- {_safe_markdown(artifact.path)} - {_safe_markdown(artifact.description)}"
+                    for artifact in check.artifacts
                 )
     return lines
 

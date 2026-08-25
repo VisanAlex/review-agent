@@ -132,6 +132,37 @@ class ConsolidationTests(unittest.TestCase):
         self.assertIn("## Browser coverage", rendered)
         self.assertIn("declined", rendered.lower())
 
+    def test_browser_authored_markdown_is_rendered_as_literal_text(self) -> None:
+        browser = BrowserVerificationRun(
+            status=BrowserVerificationStatus.COMPLETED,
+            target="host` ![pixel](https://attacker.example/pixel)",
+            display_url="https://app.example.test/dashboard",
+            checks=[
+                BrowserCheck(
+                    name="### Injected heading",
+                    status=BrowserCheckStatus.FAILED,
+                    route="/dashboard",
+                    reproduction_steps=["Open ![pixel](https://attacker.example/pixel)"],
+                    expected="No <img src=https://attacker.example/pixel> appears.",
+                    observed="[Click attacker](https://attacker.example/)",
+                    evidence="![pixel](https://attacker.example/pixel)",
+                )
+            ],
+        )
+        review = consolidate(
+            [],
+            source="working tree",
+            plan=plan(),
+            browser_verification=browser,
+        )
+
+        rendered = render_markdown(review)
+
+        self.assertNotIn("![pixel](", rendered)
+        self.assertNotIn("<img", rendered)
+        self.assertIn(r"\!\[pixel\]\(", rendered)
+        self.assertIn("&lt;img", rendered)
+
     def test_unchanged_consumers_are_preserved_as_affected_locations(self) -> None:
         reviewer = run(
             "correctness-1",

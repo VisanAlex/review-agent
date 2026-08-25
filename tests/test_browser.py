@@ -199,6 +199,32 @@ class BrowserRunTests(unittest.TestCase):
                     artifact_root=root,
                 )
 
+            with self.assertRaisesRegex(ValueError, "login route"):
+                browser_run_from_mapping(
+                    completed_run(
+                        checks=[
+                            {
+                                "name": "Unsafe login capture",
+                                "status": "failed",
+                                "route": "https://app.example.test/login",
+                                "reproduction_steps": ["Open the login page"],
+                                "expected": "No login screenshot is retained.",
+                                "observed": "A login screenshot was retained.",
+                                "evidence": "The artifact points at the configured login route.",
+                                "artifacts": [
+                                    {
+                                        "type": "screenshot",
+                                        "path": "failure.png",
+                                        "description": "Login page",
+                                    }
+                                ],
+                            }
+                        ]
+                    ),
+                    artifact_root=root,
+                    login_url="https://app.example.test/login",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

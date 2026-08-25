@@ -166,7 +166,7 @@ def _artifact(
     pure = PurePosixPath(path.replace("\\", "/"))
     if pure.is_absolute() or ".." in pure.parts or pure.suffix.casefold() not in _IMAGE_SUFFIXES:
         raise ValueError("browser artifact must be a safe relative image path")
-    if login_path is not None and route == login_path:
+    if login_path is not None and urlsplit(route).path == login_path:
         raise ValueError("browser artifacts must not capture the login route")
     if artifact_root is not None:
         root = artifact_root.resolve()
