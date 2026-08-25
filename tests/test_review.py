@@ -3,6 +3,11 @@ from __future__ import annotations
 import unittest
 
 from review_agent.models import (
+    BrowserAuthMethod,
+    BrowserCheck,
+    BrowserCheckStatus,
+    BrowserVerificationRun,
+    BrowserVerificationStatus,
     ExecutionOrigin,
     ReviewerRole,
     ReviewerRun,
@@ -74,6 +79,59 @@ def plan(*roles: ReviewerRole) -> ReviewPlan:
 
 
 class ConsolidationTests(unittest.TestCase):
+    def test_browser_coverage_is_separate_from_static_execution_mode(self) -> None:
+        reviewer = run("frontend-1", "ctx-1", ReviewerRole.FRONTEND_ACCESSIBILITY, [])
+        browser = BrowserVerificationRun(
+            status=BrowserVerificationStatus.COMPLETED,
+            target="current-host-browser",
+            display_url="https://app.example.test/dashboard",
+            auth_method=BrowserAuthMethod.EXISTING_SESSION,
+            duration_seconds=2.5,
+            checks=[
+                BrowserCheck(
+                    name="Dashboard renders",
+                    status=BrowserCheckStatus.PASSED,
+                    route="/dashboard",
+                    reproduction_steps=["Open the dashboard."],
+                    expected="The dashboard renders.",
+                    observed="The dashboard rendered.",
+                    evidence="The heading was visible.",
+                )
+            ],
+        )
+
+        review = consolidate(
+            [reviewer],
+            source="working tree",
+            plan=plan(ReviewerRole.FRONTEND_ACCESSIBILITY),
+            browser_verification=browser,
+        )
+        rendered = render_markdown(review)
+
+        self.assertEqual(review.execution_mode.value, "native-multi-agent")
+        self.assertIn("## Browser coverage", rendered)
+        self.assertIn("Dashboard renders", rendered)
+        self.assertIn("1 passed, 0 failed, 0 skipped", rendered)
+
+    def test_report_omits_browser_section_without_a_browser_decision(self) -> None:
+        review = consolidate([], source="working tree", plan=plan())
+
+        self.assertNotIn("## Browser coverage", render_markdown(review))
+
+    def test_declined_browser_coverage_is_reported_concisely(self) -> None:
+        review = consolidate(
+            [],
+            source="working tree",
+            plan=plan(),
+            browser_verification=BrowserVerificationRun(
+                status=BrowserVerificationStatus.DECLINED,
+            ),
+        )
+
+        rendered = render_markdown(review)
+        self.assertIn("## Browser coverage", rendered)
+        self.assertIn("declined", rendered.lower())
+
     def test_unchanged_consumers_are_preserved_as_affected_locations(self) -> None:
         reviewer = run(
             "correctness-1",

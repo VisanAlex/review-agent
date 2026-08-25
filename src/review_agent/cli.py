@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .browser import browser_policy_from_mapping, browser_run_from_mapping
 from .external import (
     assignment_from_mapping,
     make_adapter,
@@ -18,6 +19,7 @@ from .external import (
 from .git_changes import ChangeCollectionError, ChangeSet, collect_changes, repository_root
 from .impact import collect_impact_context
 from .models import (
+    BrowserPolicy,
     ReviewerAssignment,
     ReviewerRole,
     ReviewPlan,
@@ -48,6 +50,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "external": {
         "timeout_seconds": 300,
+    },
+    "browser": {
+        "base_url": None,
+        "login_url": None,
+        "credential_env": {},
     },
 }
 
@@ -100,6 +107,7 @@ def load_config(repo: Path) -> dict[str, Any]:
     review = _object(raw.get("review", {}), path=path, key="review")
     roles = _object(raw.get("roles", {}), path=path, key="roles")
     external = _object(raw.get("external", {}), path=path, key="external")
+    browser = _object(raw.get("browser", {}), path=path, key="browser")
 
     max_diff_chars = review.get("max_diff_chars", DEFAULT_CONFIG["review"]["max_diff_chars"])
     max_reviewers = review.get("max_reviewers", DEFAULT_CONFIG["review"]["max_reviewers"])
@@ -122,6 +130,10 @@ def load_config(repo: Path) -> dict[str, Any]:
         raise ConfigError(
             f"{path}: roles cannot be both included and excluded: {', '.join(sorted(overlap))}"
         )
+    try:
+        browser_policy = browser_policy_from_mapping(browser, eligible=False)
+    except ValueError as exc:
+        raise ConfigError(f"{path}: {exc}") from exc
     return {
         "version": 2,
         "review": {
@@ -130,6 +142,11 @@ def load_config(repo: Path) -> dict[str, Any]:
         },
         "roles": {"include": include, "exclude": exclude},
         "external": {"timeout_seconds": timeout_seconds},
+        "browser": {
+            "base_url": browser_policy.base_url,
+            "login_url": browser_policy.login_url,
+            "credential_env": dict(browser_policy.credential_env),
+        },
     }
 
 
@@ -168,6 +185,7 @@ def _context_document(
     changes: ChangeSet,
     plan: ReviewPlan,
     impact_context: dict[str, Any],
+    browser_policy: BrowserPolicy,
 ) -> dict[str, Any]:
     repository_context = collect_repository_context(
         changes.repo,
@@ -191,6 +209,7 @@ def _context_document(
             "repository_context": repository_context,
         },
         "review_plan": plan.to_dict(),
+        "browser_verification": browser_policy.to_dict(),
     }
 
 
@@ -285,6 +304,11 @@ def build_parser() -> argparse.ArgumentParser:
     consolidate_parser.add_argument("--plan", type=Path, required=True, help="Plan/context JSON file")
     consolidate_parser.add_argument(
         "--result", type=Path, action="append", required=True, help="Reviewer result JSON (repeatable)"
+    )
+    consolidate_parser.add_argument(
+        "--browser-result",
+        type=Path,
+        help="Validated browser verification result JSON from the current host",
     )
     consolidate_parser.add_argument("--output", type=Path, help="Write Markdown report")
     consolidate_parser.add_argument("--json-output", type=Path, help="Write structured JSON report")
@@ -384,7 +408,9 @@ def _install_skills(args: argparse.Namespace) -> int:
     return 0
 
 
-def _prepare(args: argparse.Namespace) -> tuple[ChangeSet, ReviewPlan, dict[str, Any]]:
+def _prepare(
+    args: argparse.Namespace,
+) -> tuple[ChangeSet, ReviewPlan, dict[str, Any], BrowserPolicy]:
     args.repo = repository_root(args.repo)
     config = load_config(args.repo)
     changes = _changes(args, config)
@@ -413,12 +439,16 @@ def _prepare(args: argparse.Namespace) -> tuple[ChangeSet, ReviewPlan, dict[str,
     )
     plan, impact_context = _recommend_with_impact(changes, policy)
     plan.reviewer_limit_source = source
-    return changes, plan, impact_context
+    browser_policy = browser_policy_from_mapping(
+        config["browser"],
+        eligible="frontend-accessibility" in plan.risk_signals,
+    )
+    return changes, plan, impact_context, browser_policy
 
 
 def _plan(args: argparse.Namespace) -> int:
-    changes, plan, impact_context = _prepare(args)
-    document = _context_document(changes, plan, impact_context)
+    changes, plan, impact_context, browser_policy = _prepare(args)
+    document = _context_document(changes, plan, impact_context, browser_policy)
     if args.format == "json":
         print(json.dumps(document, indent=2, ensure_ascii=False))
         return 0
@@ -436,6 +466,10 @@ def _plan(args: argparse.Namespace) -> int:
         f"{len({item['file'] for item in impact_context['affected_locations']})} unchanged file(s)"
     )
     print(f"Reviewer limit: {plan.max_reviewers} ({plan.reviewer_limit_source})")
+    print(
+        "Browser verification: "
+        + ("eligible (requires user approval)" if browser_policy.eligible else "not eligible")
+    )
     print("Selected specialists:")
     if plan.selected_roles:
         for item in plan.selected_roles:
@@ -451,8 +485,8 @@ def _plan(args: argparse.Namespace) -> int:
 
 
 def _context(args: argparse.Namespace) -> int:
-    changes, plan, impact_context = _prepare(args)
-    document = _context_document(changes, plan, impact_context)
+    changes, plan, impact_context, browser_policy = _prepare(args)
+    document = _context_document(changes, plan, impact_context, browser_policy)
     if args.format == "json":
         print(json.dumps(document, indent=2, ensure_ascii=False))
         return 0
@@ -496,7 +530,40 @@ def _recommendation(value: Any) -> RoleRecommendation:
     return RoleRecommendation(role=role, reason=reason, signals=list(signals))
 
 
-def _plan_from_document(document: Any) -> tuple[ReviewPlan, dict[str, Any]]:
+def _browser_policy_from_document(value: Any) -> BrowserPolicy:
+    if value is None:
+        return BrowserPolicy()
+    if not isinstance(value, dict):
+        raise ConfigError("plan browser_verification must be an object")
+    eligible = value.get("eligible")
+    if type(eligible) is not bool:
+        raise ConfigError("plan browser_verification.eligible must be a boolean")
+    expected_fields = {
+        "eligible",
+        "base_url",
+        "login_url",
+        "credential_env",
+        "login_same_origin",
+    }
+    if set(value) != expected_fields:
+        raise ConfigError("plan browser_verification fields are invalid")
+    try:
+        policy = browser_policy_from_mapping(
+            {
+                "base_url": value.get("base_url"),
+                "login_url": value.get("login_url"),
+                "credential_env": value.get("credential_env"),
+            },
+            eligible=eligible,
+        )
+    except ValueError as exc:
+        raise ConfigError(f"invalid plan browser_verification: {exc}") from exc
+    if value.get("login_same_origin") != policy.login_same_origin:
+        raise ConfigError("plan browser_verification.login_same_origin is inconsistent")
+    return policy
+
+
+def _plan_from_document(document: Any) -> tuple[ReviewPlan, dict[str, Any], BrowserPolicy]:
     if not isinstance(document, dict) or document.get("schema_version") != 1:
         raise ConfigError("plan must be a schema_version 1 object")
     context = document.get("change_context")
@@ -536,6 +603,7 @@ def _plan_from_document(document: Any) -> tuple[ReviewPlan, dict[str, Any]]:
             reviewer_limit_source=reviewer_limit_source,
         ),
         context,
+        _browser_policy_from_document(document.get("browser_verification")),
     )
 
 
@@ -546,7 +614,7 @@ def _write_output(path: Path, content: str) -> None:
 
 
 def _consolidate(args: argparse.Namespace) -> int:
-    plan, context = _plan_from_document(_read_json(args.plan, label="plan"))
+    plan, context, browser_policy = _plan_from_document(_read_json(args.plan, label="plan"))
     runs = []
     requested_external: list[str] = []
     for path in args.result:
@@ -572,11 +640,24 @@ def _consolidate(args: argparse.Namespace) -> int:
     plan.requested_external_targets = list(
         dict.fromkeys([*plan.requested_external_targets, *requested_external])
     )
+    browser_run = None
+    if args.browser_result is not None:
+        if not browser_policy.eligible:
+            raise ConfigError("browser verification result is not allowed for a non-frontend change")
+        try:
+            browser_run = browser_run_from_mapping(
+                _read_json(args.browser_result, label="browser result"),
+                artifact_root=args.browser_result.resolve().parent,
+                login_url=browser_policy.login_url,
+            )
+        except ValueError as exc:
+            raise ConfigError(f"Invalid browser result {args.browser_result}: {exc}") from exc
     review = consolidate(
         runs,
         source=str(context.get("source", plan.source)),
         plan=plan,
         changed_files=set(context["files"]),
+        browser_verification=browser_run,
     )
     markdown = render_markdown(review)
     print(markdown)
@@ -650,7 +731,12 @@ def _external(args: argparse.Namespace) -> int:
                 "Do not run tests, builds, package managers, project scripts, or arbitrary commands.",
                 "Do not report generic style advice or defects outside the supplied change.",
             ],
-            change_context=_context_document(changes, plan, impact_context)["change_context"],
+            change_context=_context_document(
+                changes,
+                plan,
+                impact_context,
+                browser_policy_from_mapping(config["browser"], eligible=False),
+            )["change_context"],
         )
 
     print(f"External targets: {', '.join(targets)}", file=sys.stderr)
