@@ -18,3 +18,16 @@ Use the invoking host's already-exposed native delegation primitive. Do not prob
 4. If delegation is missing, denied, or fails before useful output, continue sequentially in the parent as `current-agent-fallback` work.
 
 Installation compatibility does not prove native isolation. Label the actual execution, not the hoped-for capability. Parallel execution is optional; isolated contexts and parent-owned dispatch are required.
+
+## Browser capability
+
+Browser verification uses only a review-only browser or browser-test capability already exposed to the current host. This is separate from specialist delegation.
+
+| Invoking host | Browser behavior |
+|---|---|
+| Codex | Use an exposed Codex browser tool or browser-testing skill. |
+| Claude Code | Use an exposed browser tool, MCP integration, or optional skill such as `/ce-test-browser`. Compound Engineering and `/ce-test-browser` are examples, not required dependencies. |
+| Kiro or Cursor | Use an exposed browser or browser-test capability only when it is available in the current session. |
+| Another Agent Skills-compatible host | Follow the same outcome and safety contract with any already-exposed local browser capability. |
+
+If the current host exposes no suitable browser capability, record browser coverage as `unavailable`. Never launch another installed agent host to obtain browser coverage, and never install a browser package or extension during a review.

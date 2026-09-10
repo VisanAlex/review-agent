@@ -77,7 +77,8 @@ Keep orchestration mechanics out of the selectable role roster. The parent runs 
 5. `finding-verifier`: independently reopen changed code and every claimed affected location. Verify each finding's literal path, location, evidence, failure trigger, affected behavior, relationship, and change causality. This gate is mandatory even when multiple reviewers agree. Raw reviewer findings are never publishable.
 6. `deduplicator`: merge only findings with the same file, nearby location, and failure semantics while preserving contributing identities and the union of verified affected locations.
 7. `severity-calibrator`: normalize severity from demonstrated impact and reachability, never from reviewer confidence or vote count alone.
-8. `final-synthesizer`: publish only verified findings, real coverage, limitations, and independence based on distinct context IDs.
+8. Browser verification: only for `frontend-accessibility` changes and only after user consent, run the parent-owned protocol in `browser-verification.md`. Verify any proposed browser-caused code finding through `finding-verifier` before merging it with static findings. This component is not a reviewer role and has no corroboration semantics.
+9. `final-synthesizer`: publish only verified findings, real static and browser coverage, limitations, and independence based on distinct context IDs.
 
 ## Parent validation and consolidation
 

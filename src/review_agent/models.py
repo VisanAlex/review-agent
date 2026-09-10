@@ -42,6 +42,25 @@ class ReviewerStatus(StringEnum):
     TIMED_OUT = "timed-out"
 
 
+class BrowserVerificationStatus(StringEnum):
+    DECLINED = "declined"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"
+    COMPLETED = "completed"
+
+
+class BrowserCheckStatus(StringEnum):
+    PASSED = "passed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class BrowserAuthMethod(StringEnum):
+    EXISTING_SESSION = "existing-session"
+    ENVIRONMENT = "environment"
+    INTERACTIVE = "interactive"
+
+
 class ReviewerRole(StringEnum):
     CORRECTNESS = "correctness"
     TESTING = "testing"
@@ -70,6 +89,24 @@ class ReviewPolicy:
     max_reviewers: int = 4
     include_roles: list[ReviewerRole] = field(default_factory=list)
     exclude_roles: list[ReviewerRole] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class BrowserPolicy:
+    eligible: bool = False
+    base_url: str | None = None
+    login_url: str | None = None
+    credential_env: dict[str, str] = field(default_factory=dict)
+    login_same_origin: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "eligible": self.eligible,
+            "base_url": self.base_url,
+            "login_url": self.login_url,
+            "credential_env": dict(self.credential_env),
+            "login_same_origin": self.login_same_origin,
+        }
 
 
 @dataclass(frozen=True)
@@ -198,6 +235,59 @@ class ReviewerRun:
         return value
 
 
+@dataclass(frozen=True)
+class BrowserArtifact:
+    type: str
+    path: str
+    description: str
+
+    def to_dict(self) -> dict[str, str]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class BrowserCheck:
+    name: str
+    status: BrowserCheckStatus
+    route: str
+    reproduction_steps: list[str]
+    expected: str
+    observed: str
+    evidence: str
+    artifacts: list[BrowserArtifact] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        value = asdict(self)
+        value["status"] = self.status.value
+        value["artifacts"] = [artifact.to_dict() for artifact in self.artifacts]
+        return value
+
+
+@dataclass(frozen=True)
+class BrowserVerificationRun:
+    status: BrowserVerificationStatus
+    target: str | None = None
+    display_url: str | None = None
+    auth_method: BrowserAuthMethod | None = None
+    duration_seconds: float = 0.0
+    checks: list[BrowserCheck] = field(default_factory=list)
+    limitations: list[str] = field(default_factory=list)
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "status": self.status.value,
+            "target": self.target,
+            "display_url": self.display_url,
+            "auth_method": self.auth_method.value if self.auth_method is not None else None,
+            "duration_seconds": round(self.duration_seconds, 3),
+            "checks": [check.to_dict() for check in self.checks],
+            "limitations": list(self.limitations),
+            "error": self.error,
+        }
+
+
 @dataclass
 class ReviewResult:
     source: str
@@ -205,6 +295,7 @@ class ReviewResult:
     plan: ReviewPlan
     findings: list[Finding]
     reviewer_runs: list[ReviewerRun]
+    browser_verification: BrowserVerificationRun | None = None
 
     @property
     def corroborated_count(self) -> int:
@@ -223,7 +314,7 @@ class ReviewResult:
         return sorted(run.reviewer_id for run in self.reviewer_runs if run.succeeded)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "source": self.source,
             "execution_mode": self.execution_mode.value,
             "plan": self.plan.to_dict(),
@@ -233,3 +324,6 @@ class ReviewResult:
             "reviewer_errors": self.reviewer_errors,
             "reviewers": [run.to_dict() for run in self.reviewer_runs],
         }
+        if self.browser_verification is not None:
+            value["browser_verification"] = self.browser_verification.to_dict()
+        return value

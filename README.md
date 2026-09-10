@@ -80,6 +80,18 @@ Use $review-agent on this branch using all relevant specialists
 
 `all relevant specialists` raises the cap to the full 12-role roster; it does not spawn irrelevant reviewers. Limit precedence is the current invocation, then `.review-agent.json`, then the default of four. Direct helper users can pass `--max-reviewers N` or `--all-relevant`; an explicit CLI flag takes precedence over text passed with `--request`.
 
+## Optional browser verification
+
+When the change triggers the existing frontend/accessibility signal, the parent finishes static review and finding verification, then asks once:
+
+> Frontend changes detected. Run browser verification?
+
+Backend-only and documentation-only reviews do not prompt. Declining performs no URL, authentication, browser, or project-command work and adds `declined` browser coverage to the static report.
+
+After acceptance, the current host uses only a browser or browser-test capability already available in that session. It does not call another installed agent, install Playwright, or start the application. Authentication prefers an existing session, then explicitly approved `REVIEW_AGENT_BROWSER_` environment-variable names, then a user-performed interactive sign-in. Credential values remain local; password entry, cross-origin SSO, MFA, CAPTCHA, and permission dialogs remain human-only.
+
+Checks are bounded to affected frontend flows and are non-destructive. Flows that would create, update, delete, purchase, send, or publish meaningful data are skipped. Browser coverage is reported separately as `declined`, `unavailable`, `failed`, or `completed`; a completed run contains passed, failed, or skipped checks. Browser failure never removes static findings or changes the static execution mode.
+
 ## Optional external review
 
 Add external review only in the invocation that authorizes it:
@@ -138,7 +150,7 @@ review-agent context --base main --head HEAD --format json --request "Review usi
 review-agent context --format prompt --role security
 ```
 
-`review-agent consolidate --plan <plan.json> --result <result.json>` validates reviewer results, removes unsupported/off-diff findings, deduplicates likely matches, and renders the final report. The `external` command calls the explicitly authorized model target and is normally owned by the skill. It accepts either the direct `--role` plus Git-scope form shown above or the lower-level `--assignment <file>` form.
+`review-agent consolidate --plan <plan.json> --result <result.json>` validates reviewer results, removes unsupported/off-diff findings, deduplicates likely matches, and renders the final report. The skill may add `--browser-result <result.json>` for a local browser result created in a private temporary directory. The helper validates and renders browser coverage but never launches a browser. The `external` command calls the explicitly authorized model target and is normally owned by the skill. It accepts either the direct `--role` plus Git-scope form shown above or the lower-level `--assignment <file>` form.
 
 The JSON context includes `impact_context.changed_identifiers` and bounded `impact_context.affected_locations`. Those locations are unverified candidates, not findings. A published finding still uses a changed file as its primary root cause and may attach verified unchanged consumers through its own `affected_locations` array.
 
@@ -172,9 +184,19 @@ Version 2 has no provider list and no external default:
   },
   "external": {
     "timeout_seconds": 300
+  },
+  "browser": {
+    "base_url": "https://staging.example.test/dashboard",
+    "login_url": "https://staging.example.test/login",
+    "credential_env": {
+      "email": "REVIEW_AGENT_BROWSER_EMAIL",
+      "password": "REVIEW_AGENT_BROWSER_PASSWORD"
+    }
   }
 }
 ```
+
+The `browser` object is optional. It may contain URLs and dedicated environment-variable names only—never passwords, cookies, tokens, or browser storage. The target and variable names are displayed for approval before any configured value is read. URLs are sanitized for output by removing queries and fragments.
 
 Version 1 was an unreleased provider-first prototype. The helper rejects it with migration guidance instead of carrying forward automatic Codex-plus-Claude behavior.
 
@@ -201,6 +223,8 @@ Every report names its real execution mode:
 - `hybrid-parent-external`: a limited parent review plus explicit external review.
 - `hybrid-native-external`: native specialists plus explicit external review.
 - `hybrid-fallback-external`: sequential fallback plus explicit external review.
+
+An optional Browser coverage section is independent of those modes. It reports the runtime status, sanitized target, authentication method label, pass/fail/skip checks, reproduction evidence, and safe local failure screenshots. Unmapped runtime failures remain browser observations rather than speculative code findings.
 
 Raw reviewer findings are never published directly. The parent must reopen the changed root cause and every claimed affected location, then verify the literal paths, locations, evidence, trigger, affected behavior, relationship, and change causality before deduplication and severity calibration. Agreement counts only when distinct context IDs support the same verified defect.
 

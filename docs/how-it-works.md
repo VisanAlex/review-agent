@@ -15,6 +15,7 @@ sequenceDiagram
   participant P as Invoking host parent
   participant N as Native specialists
   participant E as Explicit external targets
+  participant B as Current-host browser
 
   D->>P: Invoke review-agent with optional with directive
   P->>P: Collect bounded Git context and map cross-file impact
@@ -31,8 +32,18 @@ sequenceDiagram
     P->>E: Send bounded assignments only to named targets
     E-->>P: Structured results or coverage errors
   end
-  P->>P: Verify evidence, reject invalid findings, deduplicate
-  P-->>D: Findings, coverage, execution mode, limitations
+  P->>P: Verify static evidence and reject invalid findings
+  opt Frontend signal present
+    P->>D: Frontend changes detected. Run browser verification?
+    alt Accepted and browser capability available
+      P->>B: Test bounded non-destructive affected flows
+      B-->>P: Checks and local evidence
+      P->>P: Verify any changed-code cause
+    else Declined or unavailable
+      P->>P: Preserve static review and record browser status
+    end
+  end
+  P-->>D: Findings, static and browser coverage, execution mode, limitations
 ```
 
 The parent is the only dispatcher. Reviewers never create more reviewers, so the workflow stays one level deep on Codex, Claude Code, Kiro, Cursor, and compatible hosts.
@@ -137,7 +148,7 @@ Final reports use the user's explicitly requested language and otherwise default
 
 A publishable finding must include a valid severity, changed repository-relative root-cause file, useful location, explanation, concrete evidence, plausible failure scenario, affected behavior, confidence, and a correction or regression-test direction. It may also carry verified unchanged consumers in `affected_locations`, each with an exact file, line, and relationship. An unchanged file can never replace the changed primary root cause. Raw reviewer output is never directly publishable.
 
-The parent runs a fixed pipeline: `change-mapper` -> `impact-mapper` -> `role-selector` -> specialists -> mandatory `finding-verifier` -> `deduplicator` -> `severity-calibrator` -> `final-synthesizer`. Verification reopens the changed code and every claimed affected location, checking literal paths, locations, evidence, trigger, affected behavior, relationship, and change causality even when multiple reviewers agree.
+The parent runs a fixed pipeline: `change-mapper` -> `impact-mapper` -> `role-selector` -> specialists -> mandatory `finding-verifier` -> optional browser verification for eligible accepted frontend reviews -> `deduplicator` -> `severity-calibrator` -> `final-synthesizer`. Verification reopens the changed code and every claimed affected location, checking literal paths, locations, evidence, trigger, affected behavior, relationship, and change causality even when multiple reviewers agree.
 
 The parent verifies evidence against changed code and rejects malformed, off-diff, vague, stylistic, speculative, or pre-existing claims. Similar findings merge only when file, location, and failure semantics align. Contributor reviewer IDs and context IDs remain attached.
 
@@ -145,7 +156,19 @@ Corroboration is based on distinct context IDs, not reviewer labels. This preven
 
 Failed, unavailable, invalid, or timed-out reviewers appear under limitations. Successful findings remain in the report.
 
-## 8. Packaging and portability
+## 8. Browser verification
+
+The existing `frontend-accessibility` signal is the only browser eligibility signal. Static specialists finish and their findings are verified first. Eligible reviews then ask exactly once: “Frontend changes detected. Run browser verification?” Non-frontend reviews do not prompt or invent missing browser coverage.
+
+Project configuration may provide a sanitized base URL, optional login URL, and credential environment-variable names using the `REVIEW_AGENT_BROWSER_` prefix. It never stores values. After consent, authentication is tried in this order: an existing session, configured names displayed and explicitly approved before reading, then interactive sign-in. Secret values never enter context, external assignments, result JSON, logs, reports, or screenshots. Password entry, cross-origin SSO, MFA, CAPTCHA, and permissions remain human-only.
+
+The invoking host uses only an already-exposed local browser/test capability. Codex, Claude Code, Kiro, Cursor, and other hosts can use different tools while following the same result contract; `/ce-test-browser` is one optional example, not a dependency. No browser runtime is bundled, another agent host is never called for coverage, and the helper never starts the application or browser.
+
+Checks cover only changed routes, affected interactions, verified impact relationships, and relevant responsive or keyboard behavior. They are non-destructive: any meaningful create/update/delete/purchase/send/publish action is `skipped`. Safe failed checks may reference a failure-only screenshot from a private local temporary directory; login pages, credentials, traces, videos, cookies, and storage state are never captured or uploaded.
+
+Coverage status is `declined`, `unavailable`, `failed`, or `completed`; completed checks are `passed`, `failed`, or `skipped`. A failed check becomes a code finding only after the parent verifies a changed root-cause file. Otherwise it remains a browser-only observation. Browser problems preserve static findings and do not alter the static execution-mode label.
+
+## 9. Packaging and portability
 
 One canonical bundle lives under `src/review_agent/skill_template/review-agent`. The installer copies the same `SKILL.md`, references, and optional Codex UI metadata to all four personal destinations. The repository marketplace plugin carries a checked, byte-identical mirror at `plugins/review-agent/skills/review-agent`; both the Claude Code and Codex plugin manifests point to that bundle. `scripts/sync_plugin_skill.py` refreshes the mirror, and the test suite rejects drift. Non-Codex hosts ignore `agents/openai.yaml`; it does not alter their behavior.
 

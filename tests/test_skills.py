@@ -128,6 +128,72 @@ class CanonicalSkillContractTests(unittest.TestCase):
         self.assertIn("raw reviewer findings are never publishable", text)
         self.assertIn("mandatory", text)
 
+    def test_browser_verification_is_ordered_after_static_verification(self) -> None:
+        skill = self.read("SKILL.md")
+        browser = self.read("references/browser-verification.md")
+        self.assertLess(
+            skill.index("Run mandatory finding verification"),
+            skill.index("Frontend changes detected. Run browser verification?"),
+        )
+        self.assertLess(
+            skill.index("Frontend changes detected. Run browser verification?"),
+            skill.index("Return one report"),
+        )
+        self.assertIn("exactly once", browser)
+        self.assertIn("When the signal is absent, do not prompt", browser)
+        self.assertIn("not a reviewer role", browser)
+
+    def test_browser_decline_and_unavailable_paths_preserve_static_review(self) -> None:
+        text = self.read("references/browser-verification.md").lower()
+        self.assertIn("declined", text)
+        self.assertIn("do not resolve a url", text)
+        self.assertIn("do not inspect authentication", text)
+        self.assertIn("do not invoke a browser", text)
+        self.assertIn("do not run a project command", text)
+        self.assertIn("unavailable", text)
+        self.assertIn("preserve every verified static finding", text)
+
+    def test_browser_authentication_is_local_approved_and_ordered(self) -> None:
+        text = self.read("references/browser-verification.md")
+        existing = text.index("already-authenticated session")
+        environment = text.index("configured environment variables")
+        interactive = text.index("interactive sign-in")
+        self.assertLess(existing, environment)
+        self.assertLess(environment, interactive)
+        lowered = text.lower()
+        self.assertIn("review_agent_browser_", lowered)
+        self.assertIn("display", lowered)
+        self.assertIn("explicit approval", lowered)
+        self.assertIn("before reading", lowered)
+        self.assertIn("password entry", lowered)
+        self.assertIn("human-only", lowered)
+        self.assertIn("never enter", lowered)
+
+    def test_browser_execution_is_current_host_bounded_and_non_destructive(self) -> None:
+        browser = self.read("references/browser-verification.md").lower()
+        hosts = self.read("references/host-capabilities.md").lower()
+        self.assertIn("current host", browser)
+        self.assertIn("never probe or invoke another installed agent host", browser)
+        self.assertIn("/ce-test-browser", hosts)
+        self.assertIn("not required", hosts)
+        self.assertIn("do not install", browser)
+        self.assertIn("meaningful data", browser)
+        self.assertIn("skipped", browser)
+        self.assertIn("whole-product", browser)
+
+    def test_browser_result_contract_keeps_secrets_and_artifacts_local(self) -> None:
+        text = self.read("references/browser-verification.md").lower()
+        self.assertIn("schema_version", text)
+        self.assertIn("passed", text)
+        self.assertIn("failed", text)
+        self.assertIn("skipped", text)
+        self.assertIn("failure-only", text)
+        self.assertIn("login", text)
+        self.assertIn("screenshot", text)
+        self.assertIn("never upload", text)
+        self.assertIn("browser-only observation", text)
+        self.assertIn("changed root-cause file", text)
+
     def test_impact_mapper_tracks_unchanged_consumers_without_expanding_root_cause_scope(self) -> None:
         text = self.read("references/reviewer-contract.md").lower()
         self.assertIn("code intelligence", text)
@@ -139,6 +205,7 @@ class CanonicalSkillContractTests(unittest.TestCase):
     def test_references_are_one_level_and_linked_from_skill(self) -> None:
         skill_text = self.read("SKILL.md")
         expected = {
+            "browser-verification.md",
             "reviewer-contract.md",
             "reviewer-roles.md",
             "host-capabilities.md",
@@ -182,6 +249,7 @@ class SkillInstallerTests(unittest.TestCase):
                 Path("references/reviewer-roles.md"),
                 Path("references/host-capabilities.md"),
                 Path("references/external-reviewers.md"),
+                Path("references/browser-verification.md"),
             ]
             for relative in relative_files:
                 contents = {

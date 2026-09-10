@@ -4,11 +4,15 @@ import json
 import math
 import re
 from dataclasses import replace
+from html import escape
 from pathlib import PurePosixPath
 from typing import Any
 
 from .git_changes import ChangeSet
 from .models import (
+    BrowserCheckStatus,
+    BrowserVerificationRun,
+    BrowserVerificationStatus,
     AffectedLocation,
     ExecutionMode,
     ExecutionOrigin,
@@ -392,6 +396,7 @@ def consolidate(
     source: str,
     plan: ReviewPlan,
     changed_files: set[str] | None = None,
+    browser_verification: BrowserVerificationRun | None = None,
 ) -> ReviewResult:
     normalized_changed_files = (
         {path.replace("\\", "/").removeprefix("./").casefold() for path in changed_files}
@@ -449,11 +454,91 @@ def consolidate(
         plan=plan,
         findings=findings,
         reviewer_runs=reviewer_runs,
+        browser_verification=browser_verification,
     )
 
 
 def _safe_table(value: str) -> str:
     return value.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
+_MARKDOWN_CONTROL = re.compile(r"([\\*_{}\[\]()#+!|>\-])")
+
+
+def _safe_markdown(value: str) -> str:
+    single_line = value.replace("\r", " ").replace("\n", " ")
+    escaped = escape(single_line, quote=False).replace("`", "&#96;")
+    return _MARKDOWN_CONTROL.sub(r"\\\1", escaped)
+
+
+def _browser_status_counts(browser: BrowserVerificationRun) -> tuple[int, int, int]:
+    return (
+        sum(check.status is BrowserCheckStatus.PASSED for check in browser.checks),
+        sum(check.status is BrowserCheckStatus.FAILED for check in browser.checks),
+        sum(check.status is BrowserCheckStatus.SKIPPED for check in browser.checks),
+    )
+
+
+def _render_browser_coverage(browser: BrowserVerificationRun) -> list[str]:
+    lines = ["", "## Browser coverage", "", f"Status: `{browser.status.value}`"]
+    if browser.status is BrowserVerificationStatus.DECLINED:
+        lines.extend(["", "Browser verification was offered and declined."])
+        return lines
+    if browser.target:
+        lines.append(f"Target: {_safe_markdown(browser.target)}")
+    if browser.display_url:
+        lines.append(f"URL: {_safe_markdown(browser.display_url)}")
+    if browser.auth_method:
+        lines.append(f"Authentication: `{browser.auth_method.value}`")
+    lines.append(f"Duration: {browser.duration_seconds:.1f}s")
+    if browser.error:
+        lines.extend(["", f"Error: {_safe_markdown(browser.error)}"])
+    if browser.limitations:
+        lines.extend(["", "Limitations:"])
+        lines.extend(f"- {_safe_markdown(limitation)}" for limitation in browser.limitations)
+    if browser.checks:
+        passed, failed, skipped = _browser_status_counts(browser)
+        lines.extend(
+            [
+                "",
+                f"Checks: {passed} passed, {failed} failed, {skipped} skipped.",
+                "",
+                "| Check | Status | Route | Evidence |",
+                "|---|---|---|---|",
+            ]
+        )
+        for check in browser.checks:
+            lines.append(
+                f"| {_safe_markdown(check.name)} | {check.status.value} | "
+                f"{_safe_markdown(check.route)} | {_safe_markdown(check.evidence)} |"
+            )
+        for check in browser.checks:
+            if check.status is BrowserCheckStatus.PASSED:
+                continue
+            lines.extend(
+                ["", f"### {check.status.value.title()}: {_safe_markdown(check.name)}", ""]
+            )
+            if check.reproduction_steps:
+                lines.append("Reproduction:")
+                lines.extend(
+                    f"{index}. {_safe_markdown(step)}"
+                    for index, step in enumerate(check.reproduction_steps, 1)
+                )
+                lines.append("")
+            lines.extend(
+                [
+                    f"Expected: {_safe_markdown(check.expected)}",
+                    "",
+                    f"Observed: {_safe_markdown(check.observed)}",
+                ]
+            )
+            if check.artifacts:
+                lines.extend(["", "Artifacts:"])
+                lines.extend(
+                    f"- {_safe_markdown(artifact.path)} - {_safe_markdown(artifact.description)}"
+                    for artifact in check.artifacts
+                )
+    return lines
 
 
 def render_markdown(review: ReviewResult) -> str:
@@ -494,6 +579,9 @@ def render_markdown(review: ReviewResult) -> str:
             f"| {_safe_table(run.reviewer_id)} | {run.role.value} | {run.origin.value} | "
             f"{_safe_table(run.target)} | {_safe_table(status)} | {run.duration_seconds:.1f}s | {cost} |"
         )
+
+    if review.browser_verification is not None:
+        lines.extend(_render_browser_coverage(review.browser_verification))
 
     lines.extend(["", "## Findings", ""])
     if not review.findings:
@@ -560,14 +648,17 @@ def render_markdown(review: ReviewResult) -> str:
         )
         lines.append("")
 
-    lines.extend(
-        [
-            "## Summary",
-            "",
-            f"{len(review.findings)} finding(s), {review.corroborated_count} corroborated by distinct contexts.",
-            "",
-        ]
+    summary = (
+        f"{len(review.findings)} finding(s), "
+        f"{review.corroborated_count} corroborated by distinct contexts."
     )
+    if review.browser_verification is not None and review.browser_verification.checks:
+        passed, failed, skipped = _browser_status_counts(review.browser_verification)
+        summary += (
+            " Browser verification: "
+            f"{passed} passed, {failed} failed, {skipped} skipped."
+        )
+    lines.extend(["## Summary", "", summary, ""])
     return "\n".join(lines)
 
 

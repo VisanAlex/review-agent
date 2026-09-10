@@ -40,6 +40,10 @@ class CliTests(unittest.TestCase):
         self.assertEqual(config["version"], 2)
         self.assertNotIn("providers", config)
         self.assertEqual(config["roles"], {"include": [], "exclude": []})
+        self.assertEqual(
+            config["browser"],
+            {"base_url": None, "login_url": None, "credential_env": {}},
+        )
 
     def test_plan_from_nested_directory_uses_policy_and_no_external_default(self) -> None:
         repo = self.make_repo()
@@ -74,6 +78,60 @@ class CliTests(unittest.TestCase):
         self.assertEqual(document["schema_version"], 1)
         self.assertEqual(document["review_plan"]["requested_external_targets"], [])
         self.assertIn("app.py", document["change_context"]["files"])
+        self.assertFalse(document["browser_verification"]["eligible"])
+
+    def test_frontend_plan_exposes_only_sanitized_browser_policy(self) -> None:
+        repo = self.make_repo()
+        (repo / "component.tsx").write_text("export const Component = () => <button />;\n", encoding="utf-8")
+        (repo / ".review-agent.json").write_text(
+            json.dumps(
+                {
+                    "version": 2,
+                    "browser": {
+                        "base_url": "https://app.example.test/dashboard?token=secret#section",
+                        "login_url": "https://app.example.test/login?next=/dashboard",
+                        "credential_env": {
+                            "email": "REVIEW_AGENT_BROWSER_EMAIL",
+                            "password": "REVIEW_AGENT_BROWSER_PASSWORD",
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["plan", "--repo", str(repo), "--format", "json"])
+
+        self.assertEqual(exit_code, 0)
+        document = json.loads(stdout.getvalue())
+        policy = document["browser_verification"]
+        self.assertTrue(policy["eligible"])
+        self.assertEqual(policy["base_url"], "https://app.example.test/dashboard")
+        self.assertEqual(policy["login_url"], "https://app.example.test/login")
+        self.assertEqual(policy["credential_env"]["password"], "REVIEW_AGENT_BROWSER_PASSWORD")
+        self.assertNotIn("secret", json.dumps(policy))
+        self.assertNotIn("browser_verification", document["change_context"])
+
+    def test_browser_credential_names_require_reserved_prefix(self) -> None:
+        repo = self.make_repo()
+        (repo / ".review-agent.json").write_text(
+            json.dumps(
+                {
+                    "version": 2,
+                    "browser": {"credential_env": {"password": "APP_PASSWORD"}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            exit_code = main(["plan", "--repo", str(repo)])
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("REVIEW_AGENT_BROWSER_", stderr.getvalue())
 
     def test_invocation_limit_overrides_project_configuration(self) -> None:
         repo = self.make_repo()
@@ -260,6 +318,83 @@ class CliTests(unittest.TestCase):
         self.assertIn("Changed value breaks", markdown_path.read_text(encoding="utf-8"))
         report = json.loads(json_path.read_text(encoding="utf-8"))
         self.assertEqual(report["execution_mode"], "native-multi-agent")
+
+    def test_consolidate_adds_browser_coverage_without_changing_static_mode(self) -> None:
+        repo = self.make_repo()
+        (repo / "component.tsx").write_text("export const Component = () => <button />;\n", encoding="utf-8")
+        plan_path = repo / "review-plan.json"
+        result_path = repo / "review-result.json"
+        browser_path = repo / "browser-result.json"
+        json_path = repo / "review.json"
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(main(["plan", "--repo", str(repo), "--format", "json"]), 0)
+        plan_path.write_text(stdout.getvalue(), encoding="utf-8")
+        result_path.write_text(
+            json.dumps(
+                {
+                    "reviewer_id": "frontend-1",
+                    "role": "frontend-accessibility",
+                    "origin": "native-subagent",
+                    "target": "current-host",
+                    "context_id": "ctx-1",
+                    "status": "succeeded",
+                    "findings": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        browser_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "status": "completed",
+                    "target": "current-host-browser",
+                    "display_url": "https://app.example.test/dashboard?session=hidden",
+                    "auth_method": "existing-session",
+                    "duration_seconds": 4.2,
+                    "checks": [
+                        {
+                            "name": "Dashboard opens",
+                            "status": "passed",
+                            "route": "/dashboard",
+                            "reproduction_steps": ["Open the dashboard"],
+                            "expected": "The dashboard renders.",
+                            "observed": "The dashboard rendered.",
+                            "evidence": "Primary heading and navigation were visible.",
+                            "artifacts": [],
+                        }
+                    ],
+                    "limitations": [],
+                    "error": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            exit_code = main(
+                [
+                    "consolidate",
+                    "--plan",
+                    str(plan_path),
+                    "--result",
+                    str(result_path),
+                    "--browser-result",
+                    str(browser_path),
+                    "--json-output",
+                    str(json_path),
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        report = json.loads(json_path.read_text(encoding="utf-8"))
+        self.assertEqual(report["execution_mode"], "native-multi-agent")
+        self.assertEqual(report["browser_verification"]["status"], "completed")
+        self.assertEqual(
+            report["browser_verification"]["display_url"],
+            "https://app.example.test/dashboard",
+        )
 
     def test_version_one_config_returns_migration_guidance(self) -> None:
         repo = self.make_repo()
