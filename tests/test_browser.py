@@ -147,7 +147,7 @@ class BrowserRunTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             image = root / "failure.png"
-            image.write_bytes(b"not-a-real-png")
+            image.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
             run = browser_run_from_mapping(
                 completed_run(
                     checks=[
@@ -173,6 +173,33 @@ class BrowserRunTests(unittest.TestCase):
             )
 
             self.assertEqual(run.checks[0].artifacts[0].path, "failure.png")
+
+            fake_image = root / "fake.png"
+            fake_image.write_bytes(b"password=not-an-image")
+            with self.assertRaisesRegex(ValueError, "supported image"):
+                browser_run_from_mapping(
+                    completed_run(
+                        checks=[
+                            {
+                                "name": "Renamed secret",
+                                "status": "failed",
+                                "route": "/address-book",
+                                "reproduction_steps": ["Open the modal"],
+                                "expected": "A safe screenshot is retained.",
+                                "observed": "A non-image file is retained.",
+                                "evidence": "The file has an image extension only.",
+                                "artifacts": [
+                                    {
+                                        "type": "screenshot",
+                                        "path": "fake.png",
+                                        "description": "Not an image",
+                                    }
+                                ],
+                            }
+                        ]
+                    ),
+                    artifact_root=root,
+                )
 
             with self.assertRaisesRegex(ValueError, "artifact"):
                 browser_run_from_mapping(
@@ -223,6 +250,31 @@ class BrowserRunTests(unittest.TestCase):
                     ),
                     artifact_root=root,
                     login_url="https://app.example.test/login",
+                )
+
+            with self.assertRaisesRegex(ValueError, "login route"):
+                browser_run_from_mapping(
+                    completed_run(
+                        checks=[
+                            {
+                                "name": "Unconfigured login capture",
+                                "status": "failed",
+                                "route": "/login/",
+                                "reproduction_steps": ["Open the login page"],
+                                "expected": "No login screenshot is retained.",
+                                "observed": "A login screenshot was retained.",
+                                "evidence": "The route is a recognizable login path.",
+                                "artifacts": [
+                                    {
+                                        "type": "screenshot",
+                                        "path": "failure.png",
+                                        "description": "Login page",
+                                    }
+                                ],
+                            }
+                        ]
+                    ),
+                    artifact_root=root,
                 )
 
 

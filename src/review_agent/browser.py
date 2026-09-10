@@ -21,6 +21,22 @@ _CONFIG_FIELDS = {"base_url", "login_url", "credential_env"}
 _CREDENTIAL_FIELDS = {"username", "email", "password"}
 _ENV_NAME = re.compile(r"^REVIEW_AGENT_BROWSER_[A-Z0-9_]+$")
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+_LOGIN_PATHS = {
+    "/account/login",
+    "/accounts/login",
+    "/auth/login",
+    "/auth/signin",
+    "/auth/sign-in",
+    "/login",
+    "/oauth/authorize",
+    "/saml/login",
+    "/session/new",
+    "/signin",
+    "/sign-in",
+    "/sso/login",
+    "/users/login",
+    "/users/sign_in",
+}
 _SECRET_ASSIGNMENT = re.compile(
     r"(?i)\b(password|secret|token|cookie)\b\s*[:=]\s*[^\s,;]+"
 )
@@ -150,6 +166,29 @@ def _string_list(
     ]
 
 
+def _normalized_route_path(route: str) -> str:
+    return (urlsplit(route).path or "/").rstrip("/").casefold() or "/"
+
+
+def _is_login_route(route: str, login_path: str | None) -> bool:
+    path = _normalized_route_path(route)
+    configured_path = _normalized_route_path(login_path) if login_path is not None else None
+    return path in _LOGIN_PATHS or path == configured_path
+
+
+def _has_supported_image_signature(path: Path, suffix: str) -> bool:
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(16)
+    except OSError as exc:
+        raise ValueError("browser artifact image could not be read") from exc
+    if suffix == ".png":
+        return header.startswith(b"\x89PNG\r\n\x1a\n") and header[12:16] == b"IHDR"
+    if suffix in {".jpg", ".jpeg"}:
+        return header.startswith(b"\xff\xd8\xff")
+    return len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP"
+
+
 def _artifact(
     value: Any,
     *,
@@ -166,23 +205,26 @@ def _artifact(
     pure = PurePosixPath(path.replace("\\", "/"))
     if pure.is_absolute() or ".." in pure.parts or pure.suffix.casefold() not in _IMAGE_SUFFIXES:
         raise ValueError("browser artifact must be a safe relative image path")
-    if login_path is not None and urlsplit(route).path == login_path:
+    if _is_login_route(route, login_path):
         raise ValueError("browser artifacts must not capture the login route")
-    if artifact_root is not None:
-        root = artifact_root.resolve()
-        candidate = root.joinpath(*pure.parts)
-        cursor = candidate
-        while cursor != root:
-            if cursor.is_symlink():
-                raise ValueError("browser artifact must not use symlinks")
-            cursor = cursor.parent
-        try:
-            resolved = candidate.resolve(strict=True)
-            resolved.relative_to(root)
-        except (OSError, ValueError) as exc:
-            raise ValueError("browser artifact must exist inside the current run directory") from exc
-        if not resolved.is_file():
-            raise ValueError("browser artifact must be a regular file")
+    if artifact_root is None:
+        raise ValueError("browser artifact requires the current run directory")
+    root = artifact_root.resolve()
+    candidate = root.joinpath(*pure.parts)
+    cursor = candidate
+    while cursor != root:
+        if cursor.is_symlink():
+            raise ValueError("browser artifact must not use symlinks")
+        cursor = cursor.parent
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(root)
+    except (OSError, ValueError) as exc:
+        raise ValueError("browser artifact must exist inside the current run directory") from exc
+    if not resolved.is_file():
+        raise ValueError("browser artifact must be a regular file")
+    if not _has_supported_image_signature(resolved, pure.suffix.casefold()):
+        raise ValueError("browser artifact must contain a supported image")
     description = _redact_text(
         _text(raw.get("description"), label="browser artifact description", maximum=500),
         secret_values,
